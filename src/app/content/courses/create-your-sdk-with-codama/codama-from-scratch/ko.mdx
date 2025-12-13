@@ -1,0 +1,229 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 처음부터 Codama IDL 구축하기 (Build your Codama IDL from scratch)
+
+처음부터 Codama IDL을 구축한다는 것은 프로그램에 대한 완전한 노드 트리를 생성한다는 것을 의미합니다. 이를 효율적으로 수행하기 위해 사용 가능한 노드 유형을 살펴보겠습니다.
+
+<ArticleSection name="노드 유형" id="node-types" level="h2" />
+
+### 값 노드 (Value Node)
+
+특정 값을 노드에 전달하기 위해 `ValueNode`를 사용합니다. 이 유형은 다양한 유형의 데이터를 보유할 수 있는 모든 사용 가능한 값 노드를 나타냅니다.
+
+[여기](https://github.com/codama-idl/codama/blob/main/packages/nodes/docs/valueNodes/README.md)에서 사용 가능한 모든 값에 대한 자세한 문서를 찾을 수 있습니다.
+
+> `ValueNode`는 타입 별칭(type alias)이며 노드로 직접 사용할 수 없습니다. `ValueNode`가 필요한 경우 대신 특정 값 노드 유형 중 하나를 사용하십시오.
+
+### 타입 노드 (Type Node)
+
+데이터의 구조와 형태를 정의하기 위해 `TypeNode`를 사용합니다. 이 노드들은 숫자, 문자열, 구조체, 배열 또는 사용자 정의 타입과 같이 어떤 종류의 데이터가 예상되는지 설명합니다.
+
+이들은 실제 값을 포함하지 않고 스키마를 정의합니다.
+
+[여기](https://github.com/codama-idl/codama/blob/main/packages/nodes/docs/typeNodes/README.md)에서 사용 가능한 모든 타입에 대한 자세한 문서를 찾을 수 있습니다.
+
+> `TypeNode`는 타입 별칭이며 노드로 직접 사용할 수 없습니다. `TypeNode`가 필요한 경우 대신 특정 타입 노드 유형 중 하나를 사용하십시오.
+
+### 큐별자 노드 (Discriminator Node)
+
+프로그램의 계정과 명령어를 구분하기 위해 구별자(discriminator)를 사용합니다. 이를 달성하기 위한 다양한 방법이 있으며, `DiscriminatorNode`는 모든 사용 가능한 옵션을 제공합니다:
+
+- `ConstantDiscriminatorNode`: 주어진 오프셋에서 상수 값을 설명하는 데 사용됩니다. 상수로 `ConstantValueNode`를, 오프셋으로 `number`를 받습니다:
+    
+    ```ts
+    const discriminatorNode = constantDiscriminatorNode(constantValueNodeFromString('utf8', 'Hello'), 64);
+    ```
+
+- `FieldDiscriminatorNode`: 주어진 오프셋에서 구조체 필드의 기본값을 설명하는 데 사용됩니다. 필드 이름으로 `CamelCaseString`을, 오프셋으로 `number`를 받습니다:
+    
+    ```ts
+    const discriminatorNode = fieldDiscriminatorNode('accountState', 64);
+    ```
+
+    > 필드는 계정 데이터나 명령어 인수에 있어야 하며 기본값이 있어야 합니다. 예를 들어:
+
+    ```ts
+    accountNode({
+        data: structTypeNode([
+            structFieldTypeNode({
+                name: 'discriminator',
+                type: numberTypeNode('u32'),
+                defaultValue: numberValueNode(42),
+                defaultValueStrategy: 'omitted',
+            }),
+            // ...
+        ]),
+        discriminators: [fieldDiscriminatorNode('discriminator')],
+        // ...
+    });
+    ```
+
+- `SizeDiscriminatorNode`: 데이터 크기에 따라 계정이나 명령어를 구별하는 데 사용됩니다. 크기 매개변수로 `number`를 받습니다:
+    
+    ```ts
+    const discriminatorNode = sizeDiscriminatorNode(165);
+    ```
+
+> `DiscriminatorNode`는 타입 별칭이며 노드로 직접 사용할 수 없습니다. `DiscriminatorNode`가 필요한 경우 대신 특정 구별자 노드 유형 중 하나를 사용하십시오.
+
+### PDA 시드 노드 (Pda Seed Node)
+
+프로그램 파생 주소(PDA)의 시드를 정의하기 위해 `PdaSeedNode`를 사용합니다. 이 노드들은 상수 값이나 변수 입력으로부터 PDA 주소가 어떻게 파생되어야 하는지 지정합니다. `PdaSeedNode`는 PDA 시드를 정의하는 다양한 방법을 제공합니다:
+
+- `ConstantPdaSeedNode`: 프로그램 파생 주소의 상수 시드를 설명하는 데 사용됩니다. `TypeNode`와 `ValueNode`를 조합하여 받습니다:
+
+    ```ts
+    const pdaSeedNode = constantPdaSeedNode(stringTypeNode('utf8'), stringValueNode('auth'));
+    ```
+
+    > `constantPdaSeedNodeFromString` 헬퍼를 사용하여 문자열 기반 상수를 더 쉽게 정의할 수도 있습니다. 예를 들어, 다음 예제는 위의 것과 동일합니다:
+
+    ```ts
+    const pdaSeedNode = constantPdaSeedNodeFromString('utf8', 'auth');
+    ```
+
+- `VariablePdaSeedNode`: 프로그램 파생 주소의 변수 시드를 설명하는 데 사용됩니다. 이름과 `TypeNode`를 받습니다:
+
+    ```ts
+    const pdaSeedNode = variablePdaSeedNode('authority', publicKeyTypeNode())
+    ```
+
+다음은 `pdaNode`에서 사용되는 방법입니다:
+
+```ts
+const counterPda = pdaNode({
+    name: 'counter',
+    seeds: [
+        constantPdaSeedNodeFromString('utf8', 'counter'),
+        variablePdaSeedNode('authority', publicKeyTypeNode()),
+    ],
+});
+```
+
+> `PdaSeedNode`는 타입 별칭이며 노드로 직접 사용할 수 없습니다. `PdaSeedNode`가 필요한 경우 대신 특정 pda 시드 노드 유형 중 하나를 사용하십시오.
+
+<ArticleSection name="Codama IDL 작성하기" id="writing-a-codama-idl" level="h2" />
+
+이제 프로그램에서 사용할 수 있는 가장 중요한 노드들을 검토했으므로, 처음부터 Codama IDL을 생성하는 방법을 알아보겠습니다.
+
+### 루트 노드 (Root Node)
+
+Codama IDL의 기초를 만들려면 `RootNode`를 사용합니다. 이 노드는 메인 `ProgramNode`뿐만 아니라 메인 프로그램에서 참조할 수 있는 추가 프로그램을 보유하는 최상위 컨테이너 역할을 합니다.
+
+```ts
+const node = rootNode(programNode({ ... }));
+```
+
+### 프로그램 노드 (Program Node)
+
+전체 온체인 프로그램을 정의하려면 `ProgramNode`를 사용합니다. 이 노드는 온체인에 배포된 완전한 프로그램을 나타내며 계정, 명령어, PDA, 오류와 같은 모든 최소 기능 요소를 정의합니다.
+
+이러한 핵심 요소 외에도 이 노드는 프로그램의 이름, 버전, 배포 공개 키 및 마크다운 문서를 허용합니다:
+
+
+```ts
+const node = programNode({
+    name: 'counter',
+    publicKey: '22222222222222222222222222222222222222222222',
+    version: '0.0.1',
+    docs: [],
+    accounts: [],
+    instructions: [],
+    definedTypes: [],
+    pdas: [],
+    errors: [],
+});
+```
+
+다음 섹션에서는 이 모든 요소를 자세히 살펴볼 것입니다.
+
+### 계정 노드 (Account Node)
+
+온체인 계정을 정의하려면 `AccountNode`를 사용합니다. 이 노드는 이름, 데이터 구조, 그리고 PDA 정의 및 계정 구별자와 같은 선택적 속성으로 특징지어집니다.
+
+이는 일반적으로 프로그램의 `state.rs` 파일에 해당하는 계정을 나타냅니다.
+
+docs 필드를 사용하여 이 계정이 프로그램 내에서 수행하는 작업을 설명하는 문서를 추가할 수 있습니다:
+
+```ts
+const node = accountNode({
+    name: 'token',
+    data: structTypeNode([
+        structFieldTypeNode({ name: 'mint', type: publicKeyTypeNode() }),
+        structFieldTypeNode({ name: 'owner', type: publicKeyTypeNode() }),
+        structFieldTypeNode({ name: 'amount', type: numberTypeNode('u64') }),
+    ]),
+    discriminators: [sizeDiscriminatorNode(72)],
+    size: 72,
+    pda: pdaLinkNode("associatedTokenAccount"),
+});
+```
+
+> `AccountNode`는 `PdaNode` 배열을 저장하는 것이 아니라 `PdaLinkNode`를 통한 `PdaNode`에 대한 단일 선택적 링크를 저장하므로, `PdaNode`가 `ProgramNode` 내부에 정의되어 있으면 여기서 두 개를 함께 연결할 수 있습니다.
+
+### 명령어 노드 (Instruction Node)
+
+프로그램 명령어를 정의하려면 `InstructionNode`를 사용합니다. 이 노드는 프로그램의 명령어를 나타내며 문제없이 구별자, 필수 계정, 명령어 데이터를 지정할 수 있게 해줍니다.
+
+또한 선택적 계정을 포함할 수 있습니다. 프로그램의 설계에 따라 이러한 선택적 계정은 생략하거나 프로그램 ID를 계정으로 전달하는 두 가지 방법으로 해결할 수 있습니다. `optionalAccountStrategy: "omitted" | "programId"` 필드를 사용하여 해결 방법을 선택할 수 있습니다.
+
+> `optionalAccountStrategy`가 제공되지 않으면 기본적으로 `programId` 전략이 가정됩니다.
+
+docs 필드를 사용하여 이 명령어가 프로그램 내에서 수행하는 작업을 설명하는 문서를 추가할 수 있습니다.
+
+```ts
+const node = instructionNode({
+    name: 'increment',
+    discriminators: [fieldDiscriminatorNode('discriminator')],
+    arguments: [
+        instructionArgumentNode({
+            name: 'discriminator',
+            type: numberTypeNode('u8'),
+            defaultValue: numberValueNode(1),
+            defaultValueStrategy: 'omitted',
+        }),
+    ],
+    accounts: [
+        instructionAccountNode({ name: 'counter', isWritable: true, isSigner: true }),
+        instructionAccountNode({ name: 'authority', isWritable: false, isSigner: false }),
+    ],
+    remainingAccounts: [instructionRemainingAccountsNode(argumentValueNode('authorities'), { isSigner: true })],
+    optionalAccountStrategy: 'omitted',
+});
+```
+
+`instructionAccountNode`에서 `isOptional: boolean` 필드를 사용하여 계정 선택성을 지정하거나 `ValueNode`로 해결되는 `defaultValue`를 제공할 수 있습니다.
+
+> defaultValue 기능은 `instructionArgumentNode`에서도 작동합니다.
+
+instructionArgumentNode의 defaultValueStrategy는 기본값이 처리되는 방식을 결정합니다: "optional"은 인수의 기본값이 제공된 인수에 의해 재정의될 수 있음을 의미하고, "omitted"는 인수가 제공되어서는 안 되며 항상 기본값이 사용되어야 함을 의미합니다.
+
+지정되지 않은 경우 전략은 기본적으로 "optional"입니다.
+
+### 오류 노드 (Error Node)
+
+프로그램에서 반환할 수 있는 오류를 정의하려면 `ErrorNode`를 사용합니다. 이 노드는 이름, 반환될 숫자 코드, 그리고 디버깅을 위한 관련 읽기 가능한 메시지로 특징지어집니다.
+
+```ts
+const node = errorNode({
+    name: 'invalidAmountArgument',
+    code: 1,
+    message: 'The amount argument is invalid.',
+});
+```
+
+### PDA 노드 (PDA Node)
+
+특정 프로그램 파생 주소에 대한 정의를 제공하려면 `PdaNode`를 사용합니다. 이 노드는 이름과 상수 또는 변수일 수 있는 시드 목록으로 특징지어지며, 유연한 PDA 생성을 가능하게 합니다.
+
+```ts
+const node = pdaNode({
+    name: 'counter',
+    seeds: [variablePdaSeedNode('authority', publicKeyTypeNode())],
+    docs: ['The counter PDA derived from its authority.'],
+});
+```
+
+> 프로그램 ID가 가장 가까운 ProgramNode 조상과 다른 경우 programId 필드를 사용하여 지정해야 합니다.
+
+이것은 `pdaValueNode`를 사용하여 `instructionAccountNode`의 `defaultValue`로 PDA를 연결하는 데 사용될 수 있습니다.

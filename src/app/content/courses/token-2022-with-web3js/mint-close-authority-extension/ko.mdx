@@ -1,0 +1,93 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Mint 닫기 권한 확장 (The Mint Close Authority Extension)
+
+`MintCloseAuthority` 확장은 권한이 현재 공급량이 0인 `Mint` 계정을 닫고 임대료를 회수할 수 있도록 하는 `Mint` 확장입니다.
+
+이 확장은 사용하지 않는 민트를 정리하고 계정의 임대 면제 비용을 지불하는 데 사용된 SOL을 회수하는 데 유용합니다. 민트는 유통 중인 토큰이 없을 때만 닫을 수 있습니다.
+
+<ArticleSection name="Mint 계정 초기화" id="initializing-the-mint-account" level="h2" />
+
+`Mint` 계정에 `MintCloseAuthority` 확장을 초기화하려면 `initializeMintCloseAuthority()` 함수가 필요합니다.
+
+Mint Close 확장으로 민트를 만드는 방법은 다음과 같습니다:
+
+```ts
+import {
+    Keypair,
+    SystemProgram,
+    Transaction,
+    sendAndConfirmTransaction,
+} from '@solana/web3.js';
+import {
+    createInitializeMintInstruction,
+    createInitializeMintCloseAuthorityInstruction,
+    getMintLen,
+    ExtensionType,
+    TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
+
+const mint = Keypair.generate();
+
+// Calculate the size needed for a Mint account with Mint Close Authority extension
+const mintLen = getMintLen([ExtensionType.MintCloseAuthority]);
+
+// Calculate minimum lamports required for rent exemption
+const lamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+
+// Create the account with the correct size and owner
+const createAccountInstruction = SystemProgram.createAccount({
+    fromPubkey: keypair.publicKey,
+    newAccountPubkey: mint.publicKey,
+    space: mintLen,
+    lamports,
+    programId: TOKEN_2022_PROGRAM_ID,
+});
+
+// Initialize the Mint Close Authority extension
+const initializeMintCloseAuthority = createInitializeMintCloseAuthorityInstruction(
+    mint.publicKey,
+    keypair.publicKey,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+// Initialize the mint itself
+const initializeMintInstruction = createInitializeMintInstruction(
+    mint.publicKey,
+    6,
+    keypair.publicKey,
+    null,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+// Combine all instructions in the correct order
+const transaction = new Transaction().add(
+    createAccountInstruction,
+    initializeMintCloseAuthority,
+    initializeMintInstruction,
+);
+
+const signature = await sendAndConfirmTransaction(connection, transaction, [keypair, mint]);
+
+console.log(`Mint created! Check out your TX here: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+```
+
+<ArticleSection name="Mint 계정 닫기" id="closing-the-mint-account" level="h2" />
+
+`Mint` 계정의 공급량이 0인 경우 `CloseMint Authority`는 다음과 같이 `closeAccount` 명령어를 사용하여 해당 계정의 임대료를 회수할 수 있습니다:
+
+```ts
+const closeMintInstruction = createCloseAccountInstruction(
+    mint.publicKey,
+    keypair.publicKey,
+    keypair.publicKey,
+    [],
+    TOKEN_2022_PROGRAM_ID,
+);
+
+const transaction = new Transaction().add(closeMintInstruction);
+
+const signature = await sendAndConfirmTransaction(connection, transaction, [keypair], {skipPreflight: false});
+
+console.log(`Mint closed! Check out your TX here: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+```

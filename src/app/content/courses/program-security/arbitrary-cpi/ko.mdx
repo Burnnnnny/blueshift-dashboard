@@ -1,0 +1,136 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 임의 CPI (Arbitrary CPIs)
+
+임의 프로그램 간 호출(Arbitrary Cross Program Invocation, CPI) 공격은 프로그램이 의도한 프로그램을 호출하고 있는지 확인하는 대신 파라미터로 전달된 프로그램을 맹목적으로 호출할 때 발생합니다.
+
+이는 안전한 프로그램을 악성 코드의 런처로 변환하여 공격자가 프로그램의 권한을 탈취하고 프로그램의 신원 하에 무단 작업을 실행할 수 있게 합니다.
+
+위험은 Solana의 유연한 계정 모델에 있습니다. 호출자는 명령어의 계정 목록에 모든 프로그램 ID를 전달할 수 있으므로 프로그램 주소를 확인하지 않으면 프로그램이 임의 코드 실행의 프록시가 됩니다.
+
+공격자는 예상되는 인터페이스를 모방하지만 전송 취소, 계정 고갈 또는 예상치 못한 상태 조작과 같은 완전히 다른 작업을 수행하는 악성 프로그램으로 대체할 수 있습니다.
+
+이것이 특히 음흉한 이유는 다른 모든 보안 검사가 통과하더라도 공격이 성공한다는 것입니다. 프로그램은 계정 소유권을 올바르게 검증하고 서명을 확인하고 데이터 구조를 확인할 수 있지만 올바른 프로그램과 통신하고 있는지 확인하지 않았기 때문에 결국 악성 코드를 호출하게 됩니다.
+
+<ArticleSection name="Anchor" id="anchor" level="h2" />
+
+토큰 전송을 수행하는 이 취약한 명령어를 고려하십시오:
+
+```rust
+#[program]
+pub mod insecure_cpi{
+    use super::*;
+    //..
+
+    pub fn send_tokens(ctx: Context<SendTokens>, amount: u64) -> Result<()> {
+        solana_program::program::invoke(
+            &spl_token::instruction::transfer(
+                ctx.accounts.token_program.key,
+                ctx.accounts.source.key,
+                ctx.accounts.destination.key,
+                ctx.accounts.authority.key,
+                &[],
+                amount,
+            )?,
+            &[
+                ctx.accounts.source.clone(),
+                ctx.accounts.destination.clone(),
+                ctx.accounts.authority.clone(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    //..
+}
+
+#[derive(Accounts)]
+pub struct SendTokens<'info> {
+    authority: Signer<'info>,
+    source: Account<'info, Token>,
+    destination: Account<'info, Token>,
+    /// CHECK: This account will not be checked by Anchor
+    pub token_program: UncheckedAccount<'info>,
+}
+```
+
+이 코드는 언뜻 보기에 안전해 보입니다. 소스와 목적지는 토큰 계정으로 적절하게 검증되었으며 권한은 트랜잭션에 서명해야 합니다. 그러나 `token_program` 필드는 `UncheckedAccount`이므로 Anchor는 이에 대해 어떠한 검증도 수행하지 않습니다.
+
+공격자는 다음을 통해 이를 악용할 수 있습니다:
+- SPL Token의 전송과 동일한 인터페이스를 가진 전송 명령어로 악성 프로그램 생성
+- 소스에서 목적지로 토큰을 전송하는 대신 악성 프로그램은 그 반대로 수행하거나 더 나쁜 작업을 수행
+- 악성 프로그램을 `token_program` 파라미터로 전달
+- 프로그램은 트랜잭션에 대한 완전한 권한으로 공격자의 코드를 자신도 모르게 호출
+
+토큰 계정은 합법적이지만 작업을 수행하는 프로그램은 합법적이지 않기 때문에 공격이 성공합니다. 악성 프로그램은 토큰을 잘못된 방향으로 전송하거나 계정을 공격자의 지갑으로 비우거나 전달된 계정이 허용하는 모든 작업을 수행할 수 있습니다.
+
+다행히 `Anchor`를 사용하면 `UncheckedAccount`를 `Program`으로 변경하고 프로그램 ID를 자동으로 검증하는 `Token` 유형을 전달하여 계정 구조체에서 직접 이 검사를 매우 쉽게 수행할 수 있습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct SendTokens<'info> {
+    authority: Signer<'info>,
+    source: Account<'info, Token>,
+    destination: Account<'info, Token>,
+    pub token_program: Program<'info, Token>,
+}
+```
+
+더 좋은 방법은 프로그램 검증을 자동으로 처리하는 Anchor의 CPI 헬퍼를 사용하는 것입니다:
+
+```rust
+pub fn send_tokens(ctx: Context<SendTokens>, amount: u64) -> Result<()> {
+    transfer(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.from_token_account.to_account_info(),
+                to: ctx.accounts.to_token_account.to_account_info(),
+                authority: ctx.accounts.authority.to_account_info(),
+            },
+        ),
+        &amount,
+    )?;
+
+    Ok(())
+}
+```
+
+사용자 지정 검증의 경우 CPI를 만들기 전에 프로그램 ID를 명시적으로 확인하십시오:
+
+```rust
+pub fn send_tokens(ctx: Context<SendTokens>, amount: u64) -> Result<()> {
+    if &spl_token::ID != ctx.accounts.token_program.key {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    solana_program::program::invoke(
+        &spl_token::instruction::transfer(
+            ctx.accounts.token_program.key,
+            ctx.accounts.source.key,
+            ctx.accounts.destination.key,
+            ctx.accounts.authority.key,
+            &[],
+            amount,
+        )?,
+        &[
+            ctx.accounts.source.clone(),
+            ctx.accounts.destination.clone(),
+            ctx.accounts.authority.clone(),
+        ],
+    )?;
+
+    Ok(())
+}
+```
+
+<ArticleSection name="Pinocchio" id="pinocchio" level="h2" />
+
+Pinocchio에서는 자동 프로그램 검사가 없으므로 수동 검증이 필요합니다:
+
+```rust
+if self.accounts.token_program.pubkey() != &spl_token::ID {
+    return Err(ProgramError::MissingRequiredSignature.into());
+}
+```

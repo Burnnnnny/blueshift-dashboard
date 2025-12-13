@@ -1,0 +1,124 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 서명자 확인 (Signer Checks)
+
+서명자 확인은 자필 서명을 요구하는 것에 대한 디지털 등가물로, 다른 사람이 대신 행동하는 것이 아니라 계정 소유자가 실제로 트랜잭션을 승인했음을 증명합니다. Solana의 무신뢰 환경에서 이 암호화 증명은 진정한 권한을 검증하는 유일한 방법입니다.
+
+이는 프로그램 파생 계정(PDA) 및 권한 제어 작업을 다룰 때 중요합니다. 대부분의 프로그램 계정은 계정을 수정할 수 있는 사람을 결정하는 `authority` 필드를 저장하며, 많은 PDA는 특정 사용자 계정에서 파생됩니다. 서명자 검증이 없으면 프로그램은 합법적인 소유자와 악의적인 사칭자를 구별할 방법이 없습니다.
+
+서명자 확인 누락의 결과는 파괴적입니다. 모든 계정이 특정 권한으로 제한되어야 하는 작업을 수행할 수 있게 되어 무단 액세스, 계정 고갈 및 프로그램 상태에 대한 완전한 통제권 상실로 이어질 수 있습니다.
+
+<ArticleSection name="Anchor" id="anchor" level="h2" />
+
+프로그램 계정의 소유권을 이전하는 이 취약한 명령어를 고려하십시오:
+
+```rust
+#[program]
+pub mod insecure_update{
+    use super::*;
+
+    //..
+
+    pub fn update_ownership(ctx: Context<UpdateOwnership>) -> Result<()> {
+        ctx.accounts.program_account.owner = ctx.accounts.new_owner.key();
+    
+        Ok(())
+    }
+
+    //..
+}
+
+#[derive(Accounts)]
+pub struct UpdateOwnership<'info> {
+    /// CHECK: This account will not be checked by Anchor
+    pub owner: UncheckedAccount<'info>,
+    /// CHECK: This account will not be checked by Anchor
+    pub new_owner: UncheckedAccount<'info>,
+   #[account(
+        mut,
+        has_one = owner
+    )]
+    pub program_account: Account<'info, ProgramAccount>,
+
+}
+
+#[account]
+pub struct ProgramAccount {
+    owner: Pubkey,
+}
+```
+
+언뜻 보기에 이것은 안전해 보입니다. `has_one = owner` 제약 조건은 명령어에 전달된 소유자 계정이 `program_account`에 저장된 `owner` 필드와 일치하는지 확인합니다. 데이터 검증은 완벽하지만 치명적인 결함이 있습니다.
+
+`owner`가 `Signer`가 아니라 `UncheckedAccount`라는 점에 유의하십시오. 즉, Anchor는 제공된 계정이 저장된 소유자와 일치하는지 확인하지만 해당 계정이 실제로 트랜잭션에 서명했는지는 절대 확인하지 않습니다.
+
+공격자는 다음을 통해 이를 악용할 수 있습니다:
+- 탈취하려는 프로그램 계정 찾기
+- 계정 데이터에서 현재 소유자의 공개 키 읽기
+- 실제 소유자의 공개 키를 소유자 파라미터로 전달하는 트랜잭션 생성
+- 자신을 `new_owner`로 설정
+- 실제 소유자의 서명 없이 트랜잭션 제출
+
+공개 키가 일치하기 때문에 `has_one` 제약 조건은 통과하지만, 서명자 검증이 없으므로 공격자는 합법적인 소유자의 동의 없이 소유권을 성공적으로 자신에게 이전합니다. 계정을 제어하게 되면 새로운 권한으로 모든 작업을 수행할 수 있습니다.
+
+다행히 `Anchor`를 사용하면 다음과 같이 `UncheckedAccount`를 `Signer`로 변경하여 계정 구조체에서 직접 이 검사를 매우 쉽게 수행할 수 있습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct UpdateOwnership<'info> {
+    pub owner: Signer<'info>,
+    /// CHECK: This account will not be checked by Anchor
+    pub new_owner: UncheckedAccount<'info>,
+   #[account(
+        mut,
+        has_one = owner
+    )]
+    pub program_account: Account<'info, ProgramAccount>,
+}
+```
+
+또는 다음과 같이 `signer` 계정 제약 조건을 추가할 수 있습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct UpdateOwnership<'info> {
+    #[account(signer)]
+    /// CHECK: This account will not be checked by Anchor
+    pub owner: UncheckedAccount<'info>,
+    /// CHECK: This account will not be checked by Anchor
+    pub new_owner: UncheckedAccount<'info>,
+   #[account(
+        mut,
+        has_one = owner
+    )]
+    pub program_account: Account<'info, ProgramAccount>,
+}
+```
+
+또는 다음과 같이 `ctx.accounts.owner.is_signer` 확인을 사용하여 명령어에 서명자 확인을 추가할 수 있습니다:
+
+```rust
+pub fn update_ownership(ctx: Context<UpdateOwnership>) -> Result<()> {
+    if !ctx.accounts.owner.is_signer {
+        return Err(ProgramError::MissingRequiredSignature.into());
+    }
+
+    ctx.accounts.program_account.owner = ctx.accounts.new_owner.key();
+
+    Ok(())
+}
+```
+
+이 확인을 추가하면 명령어 핸들러는 권한 계정이 트랜잭션에 서명한 경우에만 진행됩니다. 계정이 서명되지 않은 경우 트랜잭션이 실패합니다.
+
+<ArticleSection name="Pinocchio" id="pinocchio" level="h2" />
+
+Pinocchio에서는 계정 구조체 내부에 보안 검사를 직접 추가할 수 없으므로 명령어 로직에서 수행해야 합니다.
+
+`is_signer()` 함수를 사용하여 앵커와 매우 유사하게 수행할 수 있습니다:
+
+```rust
+if !self.accounts.owner.is_signer() {
+    return Err(ProgramError::MissingRequiredSignature.into());
+}
+```

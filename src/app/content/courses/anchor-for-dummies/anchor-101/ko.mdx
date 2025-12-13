@@ -1,0 +1,137 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Anchor 101
+
+![Anchor 소개](/graphics/course-banners/anchor-for-dummies.png)
+
+<ArticleSection name="Anchor란 무엇인가" id="what-is-anchor" level="h2" />
+
+Anchor는 Solana 스마트 컨트랙트 개발을 위한 최고의 프레임워크로, 온체인 프로그램의 작성, 테스트, 배포 및 상호 작용을 위한 완전한 워크플로우를 제공합니다.
+
+### 주요 장점
+
+- **보일러플레이트 감소**: Anchor는 계정 관리, 명령어 직렬화(serialization), 에러 처리와 같은 반복적인 작업을 추상화하여 핵심 비즈니스 로직에만 집중할 수 있게 해줍니다.
+- **내장된 보안**: 계정 소유권 확인 및 데이터 유효성 검사와 같은 엄격한 검사가 기본적으로 실행되어, 많은 일반적인 취약점이 드러나기 전에 완화합니다.
+
+### Anchor 매크로
+
+- `declare_id!()`: 프로그램이 존재하는 온체인 주소를 선언합니다.
+- `#[program]`: 모든 명령어 엔트리포인트와 비즈니스 로직 함수를 포함하는 모듈을 표시합니다.
+- `#[derive(Accounts)]`: 명령어가 필요로 하는 계정을 나열하고 제약 조건을 자동으로 강제합니다.
+- `#[error_code]`: 디버깅을 더 명확하고 빠르게 만드는 커스텀, 사람이 읽을 수 있는 에러 타입을 정의합니다.
+
+이러한 절차적 매크로들은 함께 로우 레벨의 바이트 관리를 추상화하여, 훨씬 적은 노력으로 안전한 프로덕션 등급의 Solana 프로그램을 제공할 수 있게 해줍니다.
+
+### 프로그램 구조
+
+각 매크로가 실제로 무엇을 하는지 자세히 설명하기 위해 프로그램의 가장 기본적인 버전부터 시작해 보겠습니다:
+
+```rust
+declare_id!("22222222222222222222222222222222222222222222");
+
+#[program]
+pub mod blueshift_anchor_vault {
+    use super::*;
+
+    pub fn deposit(ctx: Context<VaultAction>, amount: u64) -> Result<()> {
+        // ...
+        Ok(())
+    }
+
+    pub fn withdraw(ctx: Context<VaultAction>) -> Result<()> {
+        // ...
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct VaultAction<'info> {
+    // ...
+}
+
+#[error_code]
+pub enum VaultError {
+    // ...
+}
+```
+
+이는 모든 것을 `lib.rs`에 쑤셔 넣는 대신 더 구조화된 프로그램을 위해 집중된 모듈로 변환될 것입니다. 프로그램 폴더 트리는 대략 다음과 같습니다:
+
+```
+src
+├── instructions
+│       ├── instruction1.rs
+│       ├── mod.rs
+│       ├── instruction2.rs
+│       └── instruction3.rs
+├── errors.rs
+├── lib.rs
+└── state.rs
+```
+
+#### `declare_id!()`
+
+`declare_id!()` 매크로는 프로그램에 온체인 주소를 할당합니다. 이는 프로젝트의 `target` 폴더에 있는 키페어에서 파생된 고유한 공개 키입니다. 해당 키페어는 모든 프로그램 로직과 데이터를 포함하는 컴파일된 `.so` 바이너리에 서명하고 배포합니다.
+
+**참고:** Blueshift 예제에서는 내부 테스트 스위트 때문에 플레이스홀더 `222222...`를 사용합니다. 프로덕션 환경에서는 표준 빌드 및 배포 명령을 실행할 때 Anchor가 새로운 프로그램 ID를 생성해 줄 것입니다.
+
+#### `#[program]` & `#[derive(Accounts)]`
+
+모든 명령어는 모든 계정과 선택적으로 명령어가 필요로 하는 모든 데이터를 나열하는 고유한 **Context** 구조체를 가집니다.
+
+이 예제에서 `deposit`과 `withdraw`는 모두 동일한 계정을 공유하므로, 효율성과 편의를 위해 `VaultAction`이라는 단일 계정 구조체를 생성할 것입니다.
+
+#### `#[derive(Accounts)]` 매크로 자세히 보기
+
+```rust
+#[derive(Accounts)]
+pub struct VaultAction<'info> {
+  #[account(mut)]
+  pub signer: Signer<'info>,
+
+  #[account(
+    mut,
+    seeds = [b"vault", signer.key().as_ref()],
+    bump,
+  )]
+  pub vault: SystemAccount<'info>,
+
+  pub system_program: Program<'info, System>,
+}
+```
+
+코드 스니펫에서 볼 수 있듯이, `#[derive(Accounts)]` 매크로는 세 가지 중요한 책임을 수행합니다:
+- 특정 명령어가 필요로 하는 모든 계정을 선언합니다.
+- 제약 조건 검사를 자동으로 강제하여, 런타임에 많은 버그와 잠재적인 악용을 차단합니다.
+- 계정에 안전하게 접근하고 변경할 수 있는 도우미 메서드를 생성합니다.
+
+이는 계정 타입과 인라인 속성의 조합을 통해 이루어집니다.
+
+**예제의 계정 타입**
+- `Signer<'info>`: 계정이 트랜잭션에 서명했는지 확인합니다. 보안과 서명을 요구하는 CPI에 필수적입니다.
+- `SystemAccount<'info>`: 시스템 프로그램이 계정의 소유권자임을 확인합니다.
+- `Program<'info, System>`: 계정이 실행 가능하고 시스템 프로그램 ID와 일치하는지 확인하여, 계정 생성이나 lamport 전송과 같은 CPI를 가능하게 합니다.
+
+**자주 마주치게 될 인라인 속성**
+- `mut`: 계정을 변경 가능(mutable)으로 표시합니다. lamport 잔액이나 데이터가 변경될 수 있는 경우 필수입니다.
+- `seeds & bump`: 계정이 제공된 시드(seeds)와 범프(bump) 바이트에서 생성된 프로그램 파생 주소(PDA)인지 확인합니다.
+
+**참고** PDA가 중요한 이유는 다음과 같습니다:
+- PDA를 소유한 프로그램이 사용할 때, 프로그램 대신 CPI에 서명할 수 있습니다.
+- 프로그램 상태를 유지하기 위한 결정론적이고 검증 가능한 주소를 제공합니다.
+
+#### `#[error_code]`
+
+`#[error_code]` 매크로를 사용하면 프로그램 내부에서 명확한 커스텀 에러를 정의할 수 있습니다.
+
+```rust
+#[error_code]
+pub enum VaultError {
+    #[msg("Vault already exists")]
+    VaultAlreadyExists,
+    #[msg("Invalid amount")]
+    InvalidAmount,
+}
+```
+
+각 열거형 변형(variant)은 에러가 발생했을 때 설명 문자열을 로깅하는 `#[msg(...)]` 속성을 가질 수 있습니다. 이는 디버깅 중 원시 숫자 코드보다 훨씬 더 도움이 됩니다.

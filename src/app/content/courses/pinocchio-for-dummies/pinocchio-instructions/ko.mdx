@@ -1,0 +1,193 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 명령어 (Instructions)
+
+앞서 보았듯이 `TryFrom` 특성을 사용하면 비즈니스 로직과 검증을 깔끔하게 분리하여 유지 관리성과 보안을 모두 향상시킬 수 있습니다.
+
+<ArticleSection name="명령어 구조" id="instruction-structure" level="h2" />
+
+로직을 처리할 때가 되면 다음과 같은 구조를 만들 수 있습니다:
+
+```rust
+pub struct Deposit<'a> {
+    pub accounts: DepositAccounts<'a>,
+    pub instruction_datas: DepositInstructionData,
+}
+```
+
+이 구조체는 로직 처리 중에 액세스할 수 있는 데이터를 정의합니다. 그런 다음 `lib.rs` 파일에서 찾을 수 있는 `try_from` 함수를 사용하여 이를 역직렬화합니다:
+
+```rust
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Deposit<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let accounts = DepositAccounts::try_from(accounts)?;
+        let instruction_datas = DepositInstructionData::try_from(data)?;
+
+        Ok(Self {
+            accounts,
+            instruction_datas,
+        })
+    }
+}
+```
+
+이 래퍼는 세 가지 주요 이점을 제공합니다:
+1. 원시 입력(바이트 및 계정)을 모두 허용합니다.
+2. 개별 `TryFrom` 구현에 검증을 위임합니다.
+3. 완전히 유형이 지정되고 검증된 Deposit 구조체를 반환합니다.
+
+그런 다음 다음과 같이 처리 로직을 구현할 수 있습니다:
+
+```rust
+impl<'a> Deposit<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &0;
+
+    pub fn process(&self) -> ProgramResult {
+        // deposit logic
+        Ok(())
+    }
+}
+```
+
+- `DISCRIMINATOR`는 진입점에서 패턴 매칭에 사용하는 바이트입니다.
+- `process()` 메서드에는 모든 검증 검사가 이미 완료되었으므로 비즈니스 로직만 포함됩니다.
+
+결과는? 완전히 네이티브이면서도 Anchor 스타일의 인체 공학을 얻습니다. 명시적이고 예측 가능하며 빠릅니다.
+
+<ArticleSection name="프로그램 간 호출 (Cross Program Invocation)" id="cross-program-invocation" level="h2" />
+
+앞서 언급했듯이 Pinocchio는 네이티브 프로그램에 대한 크로스 프로그램 호출(CPI)을 단순화하는 `pinocchio-system` 및 `pinocchio-token`과 같은 헬퍼 크레이트를 제공합니다.
+
+이러한 헬퍼 구조체와 메서드는 이전에 사용했던 Anchor의 `CpiContext` 접근 방식을 대체합니다:
+
+```rust
+Transfer {
+    from: self.accounts.owner,
+    to: self.accounts.vault,
+    lamports: self.instruction_datas.amount,
+}
+.invoke()?;
+```
+
+`Transfer` 구조체(`pinocchio-system`에서)는 시스템 프로그램에 필요한 모든 필드를 캡슐화하고 `.invoke()`는 CPI를 실행합니다. 컨텍스트 빌더나 추가 상용구가 필요하지 않습니다.
+
+호출자가 프로그램 파생 주소(PDA)여야 하는 경우 Pinocchio는 동일한 간결한 API를 유지합니다:
+
+```rust
+let seeds = [
+    Seed::from(b"vault"),
+    Seed::from(self.accounts.owner.key().as_ref()),
+    Seed::from(&[bump]),
+];
+let signers = [Signer::from(&seeds)];
+
+Transfer {
+    from: self.accounts.vault,
+    to: self.accounts.owner,
+    lamports: self.accounts.vault.lamports(),
+}
+.invoke_signed(&signers)?;
+```
+
+**작동 방식은 다음과 같습니다:**
+1. `Seeds`는 PDA 파생과 일치하는 시드 객체 배열을 생성합니다.
+2. `Signer`는 이러한 시드를 서명자 헬퍼로 래핑합니다.
+3. `invoke_signed`는 서명자 배열을 전달하여 전송을 승인하고 CPI를 실행합니다.
+
+결과는? 일반 및 서명된 CPI 모두를 위한 깨끗하고 일류 인터페이스입니다. 매크로가 필요하지 않으며 숨겨진 마법이 없습니다.
+
+<ArticleSection name="다중 명령어 구조" id="multiple-instruction-structure" level="h2" />
+
+종종 서로 다른 구성 필드를 업데이트할 때와 같이 여러 명령어에서 동일한 계정 구조 및 검증 로직을 재사용하고 싶을 수 있습니다.
+
+각 명령어에 대해 별도의 구별자를 만드는 대신 데이터 페이로드의 크기로 명령어를 구별하는 패턴을 사용할 수 있습니다.
+
+작동 방식은 다음과 같습니다:
+
+모든 관련 구성 업데이트에 대해 단일 명령어 구별자를 사용합니다. 특정 명령어는 들어오는 데이터의 길이로 결정됩니다.
+
+그 후 프로세서에서 `self.data.len()`을 매칭합니다. 각 명령어 유형에는 고유한 데이터 크기가 있으므로 그에 따라 올바른 핸들러로 디스패치할 수 있습니다.
+
+다음과 같이 보일 것입니다:
+
+```rust
+pub struct UpdateConfig<'a> {
+    pub accounts: UpdateConfigAccounts<'a>,
+    pub data: &'a [u8],
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for UpdateConfig<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let accounts = UpdateConfigAccounts::try_from(accounts)?;
+
+        // 초기화된 구조체 반환
+        Ok(Self { accounts, data })
+    }
+}
+
+impl<'a> UpdateConfig<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &4;
+
+    pub fn process(&mut self) -> ProgramResult {
+        match self.data.len() {
+            len if len == size_of::<UpdateConfigStatusInstructionData>() => {
+                self.process_update_status()
+            }
+            len if len == size_of::<UpdateConfigFeeInstructionData>() => self.process_update_fee(),
+            len if len == size_of::<UpdateConfigAuthorityInstructionData>() => {
+                self.process_update_authority()
+            }
+            _ => Err(ProgramError::InvalidInstructionData),
+        }
+    }
+
+    //..
+}
+```
+
+호출할 핸들러를 알 때까지 명령어 데이터의 역직렬화를 연기한다는 점에 유의하십시오. 이렇게 하면 불필요한 구문 분석을 피하고 진입점 로직을 깨끗하게 유지할 수 있습니다.
+
+각 핸들러는 특정 데이터 유형을 역직렬화하고 업데이트를 수행합니다:
+
+```rust
+pub fn process_update_authority(&mut self) -> ProgramResult {
+    let instruction_data = UpdateConfigAuthorityInstructionData::try_from(self.data)?;
+
+    let mut data = self.accounts.config.try_borrow_mut_data()?;
+    let config = Config::load_mut_unchecked(&mut data)?;
+
+    unsafe { config.set_authority_unchecked(instruction_data.authority) }?;
+
+    Ok(())
+}
+
+pub fn process_update_fee(&mut self) -> ProgramResult {
+    let instruction_data = UpdateConfigFeeInstructionData::try_from(self.data)?;
+
+    let mut data = self.accounts.config.try_borrow_mut_data()?;
+    let config = Config::load_mut_unchecked(&mut data)?;
+
+    unsafe { config.set_fee_unchecked(instruction_data.fee) }?;
+
+    Ok(())
+}
+
+pub fn process_update_status(&mut self) -> ProgramResult {
+    let instruction_data = UpdateConfigStatusInstructionData::try_from(self.data)?;
+
+    let mut data = self.accounts.config.try_borrow_mut_data()?;
+    let config = Config::load_mut_unchecked(&mut data)?;
+
+    unsafe { config.set_state_unchecked(instruction_data.status) }?;
+
+    Ok(())
+}
+```
+
+이 접근 방식을 사용하면 계정 검증을 공유하고 여러 관련 명령어에 대해 단일 진입점을 사용하여 상용구를 줄이고 코드베이스를 유지 관리하기 쉽게 만들 수 있습니다.
+
+데이터 크기에 대한 패턴 매칭을 통해 추가 구별자나 복잡한 구문 분석 없이 올바른 로직으로 효율적으로 라우팅할 수 있습니다.

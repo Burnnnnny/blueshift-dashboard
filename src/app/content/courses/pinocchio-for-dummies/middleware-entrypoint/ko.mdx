@@ -1,0 +1,180 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 미들웨어 진입점 (Middleware entrypoint)
+
+모든 명령어가 동등하게 생성되는 것은 아닙니다. 일부 명령어는 다른 명령어보다 더 자주 호출되어 성능 병목 현상을 일으킵니다.
+
+효율성과 최적화를 우선시하기 위해 이러한 고빈도 명령어를 처리하는 다른 접근 방식이 필요합니다.
+
+여기서 "핫(hot)" 및 "콜드(cold)" 경로 전략이 등장합니다.
+
+"핫" 경로는 자주 호출되는 명령어를 위해 최적화된 진입점을 생성하여 가능한 한 빨리 "실패" 상태에 도달하도록 설계되어 필요한 경우 표준 Pinocchio 진입점으로 돌아갈 수 있습니다.
+
+<ArticleSection name="핫 경로" id="the-hot-path" level="h2" />
+
+핫 경로는 처리하기 전에 모든 계정 데이터를 역직렬화하는 표준 진입점 로직을 우회합니다. 대신 최대 성능을 위해 원시 데이터로 직접 작업합니다.
+
+### 표준 vs. 핫 경로 처리 (Standard vs. Hot Path Processing)
+
+표준 진입점에서 로더는 명령어가 필요한 모든 것을 BPF VM의 입력 페이지에 저장된 플랫 C 스타일 레코드로 압축합니다. 진입점 매크로는 이 레코드의 압축을 풀고 세 가지 안전 슬라이스인 `program_id`, 계정 및 `instruction_data`를 제공합니다.
+
+핫 경로에서는 무엇을 기대해야 하는지 정확히 알고 있으므로 원시 진입점 데이터에서 직접 계정을 확인하고 조작하여 불필요한 역직렬화 오버헤드를 제거할 수 있습니다.
+
+원시 입력 구조는 다음과 같습니다:
+
+```rust
+pub struct Entrypoint {
+    account_len: u64,
+    account_info: [AccountRaw; account_len]
+    instruction_len: u64,
+    instruction_data: [u8; instruction_len]
+    program_id: [u8; 32],
+}
+
+pub struct AccountRaw {
+    is_duplicate: u8,
+    is_signer: u8,
+    is_writable: u8,
+    executable: u8,
+    alignment: u32,
+    key: [u8; 32],
+    owner: [u8; 32],
+    lamports: u64,
+    data_len: usize,
+    data: [u8; data_len],
+    padding: [u8; 10_240],
+    alignment_padding: [u8; ?],
+    rent_epoch: i64,
+}
+```
+
+### 핫 경로 구별자 (Hot Path Discriminators)
+
+핫 경로를 설계할 때 현재 명령어가 핫 경로에 의해 처리되어야 하는지 아니면 가능한 한 빨리 콜드 경로로 라우팅되어야 하는지 결정할 수 있는 신뢰할 수 있는 방법이 필요합니다.
+
+기존 구별자는 계정 수와 내부 데이터에 따라 매번 다른 오프셋에 나타나므로 여기서는 작동하지 않습니다.
+
+항상 같은 오프셋에 있는 것을 확인해야 합니다. 현재 이러한 명령어를 구별하는 두 가지 접근 방식이 있습니다:
+- 계정 수: 계정 수는 원시 진입점의 첫 번째 입력이므로 전달된 계정 수에 따라 구별할 수 있습니다: `if *input == 4u64`.
+    계정 수는 입력 데이터의 맨 처음에 고정된 위치를 가지기 때문에 작동합니다.
+
+- 첫 번째 계정 공개 키: 첫 번째 계정의 공개 키가 고정 오프셋에 나타나므로 항상 상수 키 쌍(권한 또는 프로그램과 같은)을 첫 번째 위치에 배치하고 해당 키를 기반으로 구별하도록 프로그램을 설계할 수 있습니다.
+
+> 현재 레지스트리 `r2`에 명령어 데이터를 갖도록 하는 SIMD가 열려 있습니다. 즉, 구현된 후에는 핫 경로에 대한 구별자를 사용할 수 있게 될 것입니다.
+
+<ArticleSection name="진입점 디자인" id="entrypoint-design" level="h2" />
+
+[이 PR](https://github.com/anza-xyz/pinocchio/pull/241)을 통해 [Dean](https://x.com/deanmlittle)은 Pinocchio에 `middleware_entrypoint`라는 새로운 진입점을 도입하여 프로그램에 대한 쉬운 핫 경로 생성을 가능하게 했습니다.
+
+구현 방법은 다음과 같습니다:
+
+```rust
+/// 호출될 가능성이 없다는 힌트를 컴파일러에 제공하는 "더미" 함수입니다.
+///
+/// 이 함수는 함수가 사용되는 경로 대신 다른 코드 경로를 최적화하도록
+/// 컴파일러에 힌트로 사용됩니다.
+#[cold]
+pub const fn cold_path() {}
+
+/// `true`가 될 가능성이 높다는 힌트와 함께 주어진 `bool` 값을 반환합니다.
+#[inline(always)]
+pub const fn likely(b: bool) -> bool {
+    if b {
+        true
+    } else {
+        cold_path();
+        false
+    }
+}
+
+middleware_entrypoint!(hot, process_instruction);
+
+#[inline(always)]
+pub fn hot(input: *mut u8) -> u64 {
+    unsafe { *input as u64 }
+}
+
+#[inline(always)]
+fn process_instruction(
+    _program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {    
+    match instruction_data.split_first() {
+        Some((Instruction1::DISCRIMINATOR, data)) => Instruction1::try_from((data, accounts))?.process(),
+        Some((Instruction2::DISCRIMINATOR, _)) => Instruction2::try_from(accounts)?.process(),
+        _ => Err(ProgramError::InvalidInstructionData)
+    }
+}
+```
+
+### 작동 방식 (How It Works)
+
+진입점은 먼저 "핫" 함수를 호출하고 오류를 반환하는지 확인한 다음, 그렇다면 기본 Pinocchio 진입점으로 돌아갑니다. 이를 통해 호환성을 유지하면서 일반적인 작업을 위한 빠른 경로를 생성합니다.
+
+`#[cold]` 속성은 이 함수가 거의 호출되지 않음을 컴파일러에 알립니다. 최적화 중에 컴파일러는 콜드 코드 경로의 우선 순위를 낮추고 핫 경로를 최적화하는 데 리소스를 집중합니다.
+
+### 핫 경로 디자인 원칙 (Hot Path Design Principles)
+
+핫 경로를 설계할 때 원시 입력으로 작업하므로 엄격한 검증이 필수적입니다. 정의되지 않은 동작은 전체 프로그램을 손상시킬 수 있습니다.
+
+계정 오프셋과 길이가 예상과 일치하는지 항상 확인하십시오. [sbpf.xyz](https://sbpf.xyz/)를 사용하여 올바른 오프셋을 결정한 다음 다음과 같이 검증하십시오:
+
+```rust
+if *input == 4
+    && (*input.add(ACCOUNT1_DATA_LEN).cast::<u64>() == 165)
+    && (*input.add(ACCOUNT2_DATA_LEN).cast::<u64>() == 82)
+    && (*input.add(IX12_ACCOUNT3_DATA_LEN).cast::<u64>() == 165)
+{
+    //...
+}
+```
+
+계정 데이터 길이가 가변적인 경우 다음과 같이 동적 오프셋을 생성하여 명령어 데이터를 찾습니다:
+
+```rust
+/// 주소를 다음 8의 배수로 정렬합니다.
+#[inline(always)]
+fn align(input: u64) -> u64 {
+    (input + 7) & (!7)
+}
+
+//...
+
+// `authority` 계정은 가변 데이터 길이를 가질 수 있습니다.
+    let account_4_data_len_aligned =
+        align(*input.add(IX12_ACCOUNT4_DATA_LEN).cast::<u64>()) as usize;
+    let offset = IX12_EXPECTED_INSTRUCTION_DATA_LEN_OFFSET + account_4_data_len_aligned;
+```
+
+검증이 통과되면 명령어 데이터를 추출하고 계정을 변환한 다음 정상적으로 처리합니다:
+
+```rust
+// 충분한 명령어 데이터가 있는지 확인합니다.
+if input.add(offset).cast::<usize>().read() >= INSTRUCTION_DATA_SIZE {
+    let discriminator = input.add(offset + size_of::<u64>()).cast::<u8>().read();
+
+    // 명령어 구별자를 확인합니다.
+    if likely(discriminator == 12) {
+        // 명령어 데이터 길이 (u64) + 구별자 (u8)
+        let instruction_data = unsafe { from_raw_parts(input.add(offset + size_of::<u64>() + size_of::<u8>()), INSTRUCTION_DATA_SIZE - size_of::<u8>()) };
+
+        let accounts = unsafe {
+            [
+                transmute::<*mut u8, AccountInfo>(input.add(ACCOUNT1_HEADER_OFFSET)),
+                transmute::<*mut u8, AccountInfo>(input.add(ACCOUNT2_HEADER_OFFSET)),
+                transmute::<*mut u8, AccountInfo>(input.add(IX12_ACCOUNT3_HEADER_OFFSET)),
+                transmute::<*mut u8, AccountInfo>(input.add(IX12_ACCOUNT4_HEADER_OFFSET)),
+            ]
+        };
+
+        return match Instruction1::try_from((instruction_data, accounts))?.process() {
+            Ok(()) => SUCCESS,
+            Err(error) => {
+                log_error(&error);
+                error.into()
+            }
+        };
+    }
+}
+```

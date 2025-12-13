@@ -1,0 +1,80 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Anchor를 활용한 명령어 내부 검사 (Instruction Introspection with Anchor)
+
+Anchor에는 `Instruction` sysvar에 대한 내장 헬퍼가 없지만, `solana_program` 크레이트의 모든 타입과 함수는 Anchor에서 본질적으로 지원됩니다.
+
+Anchor에서 명령어 내부 검사를 사용하려면 프로젝트에 `solana_program` 크레이트를 추가해야 합니다:
+
+```sh
+cargo add solana-program
+```
+
+크레이트를 추가한 후, 필요한 함수를 가져와서 접근할 수 있습니다:
+
+```rust
+use solana_program::sysvar::instructions::{
+    self,
+    load_current_index_checked, 
+    load_instruction_at_checked
+}; 
+```
+
+<ArticleSection name="내부 검사 사용 방법" id="how-to-use-introspection" level="h2" />
+
+소개에서 언급했듯이, 명령어 내부 검사는 `Instruction` sysvar 계정의 데이터를 역직렬화하여 트랜잭션의 명령어에 대한 세부 정보를 제공하는 방식으로 작동합니다.
+
+`load_instruction_at_checked` 함수가 역직렬화되는 계정이 올바른지 확인하지만, 계정 구조체에 추가 검사를 추가하는 것이 좋은 관행입니다:
+
+```rust
+#[account(address = instructions::ID)]
+/// CHECK: InstructionsSysvar account
+instructions: UncheckedAccount<'info>,
+```
+
+이제 명령어 내부 검사 작업을 시작할 수 있습니다.
+
+먼저, `load_current_index_checked` 함수를 사용하여 현재 명령어의 인덱스를 확인합니다:
+
+```rust
+// 현재 실행 중인 명령어의 인덱스를 확인합니다. 이는 [0]이 아닌 다른 위치에 있을 수 있습니다.
+let index = load_current_index_checked(&ctx.accounts.instructions.to_account_info())?;
+```
+
+다음으로, `load_instruction_at_checked`를 사용하여 상대적 인덱스에 있는 명령어를 확인할 수 있습니다. 여기서는 현재 명령어 바로 다음에 오는 명령어를 확인합니다:
+
+```rust
+// 다음 명령어를 로드하여 입력을 확인합니다.
+let ix = load_instruction_at_checked(index as usize + 1, &ctx.accounts.instructions.to_account_info())?;
+```
+
+다음 단계로 넘어가기 전에, 악의적인 공격을 방지하는 데 필수적인 정보가 무엇인지 고려하는 것이 중요합니다.
+
+우리는 보통 호출되는 프로그램이 예상된 프로그램인지 확인하는 것으로 시작합니다. 이 예제에서는 동일한 프로그램의 다른 명령어를 검사하고 있습니다:
+
+```rust
+require_keys_eq!(ix.program_id, ID, EscrowError::InvalidProgram);
+```
+
+다음으로, 명령어가 예상한 명령어인지 확인합니다. 그렇게 하려면 명령어의 구별자(discriminator)를 예상된 것과 비교합니다. 이 경우 다른 Anchor 명령어이므로 다음과 같이 할 수 있습니다:
+
+```rust
+require!(ix.data[0..8].eq(instruction::TakeEnd::DISCRIMINATOR.as_slice()), EscrowError::InvalidIx);
+```
+
+> Anchor는 `anchor_lang::Discriminator` 트레이트를 명령어에 직접 제공하여 이를 더 쉽게 만듭니다.
+
+그런 다음 확인 중인 명령어의 로직에 따라 더 많은 프로그램별 검사를 수행할 수 있습니다.
+
+이 예제에서는 명령어 데이터(금액)가 올바른지 확인합니다. 명령어 데이터는 항상 구별자 다음에 역직렬화되므로 다음과 같이 할 수 있습니다:
+
+```rust
+require!(ix.data[8..16].eq(&escrow.take_amount.to_le_bytes()), EscrowError::InvalidAmount);
+```
+
+마지막으로, 검사된 명령어에 있는 계정을 확인합니다. 이 단계는 `Account` 구조체의 정확한 구조를 알아야 합니다. 특정 인덱스에 있는 계정의 데이터나 공개 키를 요청할 것이기 때문입니다:
+
+```rust
+let maker_ata = get_associated_token_address(&ctx.accounts.maker.key(), &escrow.mint_b);
+require_keys_eq!(ix.accounts.get(3).unwrap().pubkey, maker_ata, EscrowError::InvalidMakerATA);
+```

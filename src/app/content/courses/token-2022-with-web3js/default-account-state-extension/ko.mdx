@@ -1,0 +1,135 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 기본 계정 상태 확장 (The Default Account State Extension)
+
+`DefaultAccountState` 확장은 특정 민트에 대해 새로 생성된 모든 `Token` 계정이 기본적으로 동결되도록 허용하는 Mint 확장입니다. 그러면 민트의 `Freeze Authority`가 이러한 `Token` 계정을 해동(동결 해제)하여 사용할 수 있게 할 수 있습니다.
+
+<ArticleSection name="Mint 계정 초기화" id="initializing-the-mint-account" level="h2" />
+
+Mint` 계정에 `DefaultAccountState` 확장을 초기화하려면 `initializeDefaultAccountState()` 함수가 필요합니다.
+
+기본 계정 상태 확장으로 민트를 만드는 방법은 다음과 같습니다:
+
+```ts
+import {
+    Keypair,
+    SystemProgram,
+    Transaction,
+    sendAndConfirmTransaction,
+} from '@solana/web3.js';
+import {
+    createInitializeMintInstruction,
+    createInitializeDefaultAccountStateInstruction,
+    getMintLen,
+    ExtensionType,
+    TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
+
+const mint = Keypair.generate();
+
+// Calculate the size needed for a Mint account with Default Account State extension
+const mintLen = getMintLen([ExtensionType.DefaultAccountState]);
+
+// Calculate minimum lamports required for rent exemption
+const lamports = await connection.getMinimumBalanceForRentExemption(mintLen);
+
+// Create the account with the correct size and owner
+const createAccountInstruction = SystemProgram.createAccount({
+    fromPubkey: keypair.publicKey,
+    newAccountPubkey: mint.publicKey,
+    space: mintLen,
+    lamports,
+    programId: TOKEN_2022_PROGRAM_ID,
+});
+
+// Initialize the Default Account State extension
+const initializeDefaultAccountState = createInitializeDefaultAccountStateInstruction(
+    mint.publicKey,
+    AccountState.Frozen,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+// Initialize the mint itself
+const initializeMintInstruction = createInitializeMintInstruction(
+    mint.publicKey,
+    6,
+    keypair.publicKey,
+    keypair.publicKey, // freeze authority is MANDATORY
+    TOKEN_2022_PROGRAM_ID,
+);
+
+// Combine all instructions in the correct order
+const transaction = new Transaction().add(
+    createAccountInstruction,
+    initializeDefaultAccountState,
+    initializeMintInstruction,
+);
+
+const signature = await sendAndConfirmTransaction(connection, transaction, [keypair, mint]);
+
+console.log(`Mint created! Check out your TX here: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+```
+
+> `Mint`의 `Freeze Authority`는 이 확장에 필수적입니다. 그렇지 않으면 생성 시 `Token` 계정을 해동할 수 없습니다.
+
+<ArticleSection name="토큰 계정 해동" id="thawing-the-token-account" level="h2" />
+
+`DefaultAccountState` 확장이 있다는 것은 초기화되는 모든 `Token` 계정이 기본적으로 `동결`된다는 것을 의미합니다.
+
+즉, 우리가 해동(동결 해제)하지 않으면 해당 `Token` 계정으로 `Mint`, `Transfer` 또는 그 어떤 작업도 할 수 없습니다.
+
+다음과 같이 `thawAccount` 명령어를 사용하여 `Token` 계정을 쉽게 해동할 수 있습니다:
+
+```ts
+const ata = await getAssociatedTokenAddress(
+    mint.publicKey,
+    keypair.publicKey,
+    false,
+    TOKEN_2022_PROGRAM_ID
+);
+
+const createAtaInstruction = createAssociatedTokenAccountIdempotentInstruction(
+    keypair.publicKey, // payer
+    ata, // associated token account address
+    keypair.publicKey, // owner
+    mint.publicKey, // mint
+    TOKEN_2022_PROGRAM_ID
+)
+
+const thawAtaInstruction = createThawAccountInstruction(
+    ata,
+    mint.publicKey,
+    keypair.publicKey,
+    undefined,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+const transaction = new Transaction().add(
+    createAtaInstruction,
+    thawAtaInstruction,
+);
+
+const signature = await sendAndConfirmTransaction(connection, transaction, [keypair], {skipPreflight: true});
+
+console.log(`Token accounts created and thawed! Check out your TX here: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+```
+
+<ArticleSection name="기본 계정 상태 변경" id="changing-the-default-account-state" level="h2" />
+
+토큰 분배에 대한 더 큰 통제권을 가질 필요가 없어지고 모든 사람이 자유롭게 토큰을 거래하게 하고 싶다면 다음과 같이 `updateDefaultAccountState` 명령어를 사용하여 기본 계정 상태를 변경할 수 있습니다:
+
+```ts
+const updateDefaultAccountStateInstruction = createUpdateDefaultAccountStateInstruction(
+    mint.publicKey,
+    AccountState.Initialized,
+    keypair.publicKey,
+    undefined,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+const transaction = new Transaction().add(updateDefaultAccountStateInstruction);
+
+const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
+
+console.log(`Default account state changed! Check out your TX here: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+```

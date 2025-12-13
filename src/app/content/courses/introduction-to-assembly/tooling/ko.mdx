@@ -1,0 +1,102 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 도구 (Tooling)
+
+sBPF 어셈블리 프로그램을 작성하고 빌드하려면 전통적으로 전체 Solana 툴체인이 필요했는데, 이는 설정이 복잡하고 플랫폼에 따라 다를 수 있습니다. 바로 이러한 이유로 [Dean](https://x.com/deanmlittle)은 [Claire](https://x.com/clairefxyz)의 기여로 sBPF 어셈블리 프로그램을 생성하고 빌드하기 위한 완전한 툴킷인 sBPF를 만들었습니다.
+
+<ArticleSection name="설치" id="installation" level="h2" />
+
+패키지를 설치하는 것으로 시작합니다:
+
+```
+cargo install --git https://github.com/blueshift-gg/sbpf.git
+```
+
+그 후 다음 모든 명령을 수행할 수 있습니다:
+- `init`: 새 프로젝트 스캐폴드를 생성합니다.
+- `build`: Solana 프로그램 실행 파일로 컴파일합니다.
+- `deploy`: 프로그램을 빌드하고 배포합니다.
+- `test`: 배포된 프로그램을 테스트합니다.
+- `e2e`: 프로그램을 빌드, 배포 및 테스트합니다.
+- `clean`: 빌드 및 배포 아티팩트를 정리합니다.
+- `help`: 이 메시지 또는 주어진 하위 명령의 도움말을 출력합니다.
+
+```text
+Usage: sbpf <COMMAND>
+
+Commands:
+  init    Create a new project scaffold
+  build   Compile into a Solana program executable
+  deploy  Build and deploy the program
+  test    Test deployed program
+  e2e     Build, deploy and test a program
+  clean   Clean up build and deploy artifacts
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+<ArticleSection name="새 프로젝트 초기화" id="initialize-a-new-project" level="h2" />
+
+새 프로젝트를 생성하려면 `sbpf init` 명령을 사용합니다. 기본적으로 Mollusk를 사용하는 Rust 테스트로 프로젝트를 초기화합니다. `--ts-tests` 옵션을 사용하여 TypeScript 테스트로 프로젝트를 초기화할 수도 있습니다.
+
+```text
+sbpf init --help
+Create a new project scaffold
+
+Usage: sbpf init [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  The name of the project to create
+
+Options:
+  -t, --ts-tests  Initialize with TypeScript tests instead of Mollusk Rust tests
+  -h, --help      Print help information
+  -V, --version   Print version information
+```
+
+프로젝트를 초기화한 후 프로젝트 디렉토리로 이동하여 다른 명령을 사용하여 프로그램을 빌드, 배포 및 테스트할 수 있습니다.
+
+<ArticleSection name="프로그램 빌드" id="building-programs" level="h2" />
+
+sBPF는 설정 및 필요에 따라 두 가지 빌드 옵션을 제공합니다:
+
+### sBPF 빌드
+
+build 명령은 추가 종속성이 필요 없는 독립 실행형 어셈블러를 사용합니다. 모든 플랫폼에서 "그냥 작동"하기 때문에 학습 및 실험에 완벽합니다.
+
+```
+sbpf build
+```
+
+{/*
+
+TODO: Update sbpf to enable llvm build as an optional configuration then reenable this
+
+### Full Build
+
+The standard build command provides integration with the complete Solana toolchain and project management features. 
+
+> This requires the [Solana Command Line Tools](https://docs.anza.xyz/cli/install/) to be installed.
+
+```
+sbpf build
+``` */}
+
+### 고급 사용법
+
+링크 파일 이름을 프로그램 이름과 동일하게 src 디렉토리에 포함시켜 사용자 정의 링커 파일로 기본 링커를 재정의할 수 있습니다. 예를 들어:
+
+```text
+src/example/example.s
+src/example/example.ld
+```
+
+<ArticleSection name="개발 환경" id="development-environment" level="h2" />
+
+최고의 개발 경험을 위해 다음을 제공하는 [VS Code sBPF Assembly 확장](https://github.com/deanmlittle/vscode-sbpf-asm)을 설치하는 것이 좋습니다:
+- sBPF 어셈블리에 대한 구문 강조 표시
+- 명령어 및 레지스터에 대한 코드 완성
+- 오류 감지 및 경고

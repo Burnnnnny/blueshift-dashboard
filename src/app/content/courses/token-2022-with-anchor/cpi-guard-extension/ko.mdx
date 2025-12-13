@@ -1,0 +1,7 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# CPI 가드 확장 (The Cpi Guard Extension)
+
+`CpiGuard` 확장은 크로스 프로그램 호출 내부에서 특정 작업을 금지하여 명시적 동의 없이 토큰 계정을 조작하려는 악성 프로그램으로부터 사용자를 보호하는 `Token` 계정 확장입니다.
+
+> 안타깝게도 CPI를 통해 CpiGuard 확장을 초기화하거나 업데이트하는 것은 불가능합니다. 자세한 내용은 [여기](https://github.com/solana-labs/solana-program-library/blob/6968859e2ee0a1764da572de340cdb58e2b4586f/token/program-2022/src/extension/cpi_guard/processor.rs#L44-L46)를 참조하세요.

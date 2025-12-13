@@ -1,0 +1,274 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 명령어 (Instructions)
+
+이제 sBPF의 레지스터와 메모리 영역을 이해했으므로, 이를 조작하는 명령어를 살펴보겠습니다.
+
+명령어는 프로그램이 수행하는 기본 작업입니다. 숫자 더하기, 메모리에서 로드하기 또는 다른 위치로 점프하기 등이 있습니다.
+
+<ArticleSection name="명령어란 무엇인가요?" id="what-are-instructions" level="h2" />
+
+명령어는 프로그램의 기본 구성 요소입니다. 프로세서에게 무엇을 해야 하는지 정확하게 알려주는 명령이라고 생각하세요:
+- `add64 r1, r2`: "레지스터 `r1`과 `r2`의 값을 더하고 결과를 `r1`에 저장하라"
+- `ldxdw r0, [r10 - 8]`: "스택 메모리에서 레지스터 `r0`로 8바이트를 로드하라"
+- `jeq r1, 42, +3`: "`r1`이 42와 같으면 3개 명령어 앞으로 점프하라"
+
+각 명령어는 정확히 하나의 작업을 수행하며 즉각적인 VM 디코딩을 위해 정확히 8바이트의 데이터로 인코딩됩니다.
+
+sBPF 명령어는 다양한 데이터 크기로 작동합니다:
+- byte = 8비트 (1바이트)
+- halfword = 16비트 (2바이트)
+- word = 32비트 (4바이트)
+- doubleword = 64비트 (8바이트)
+
+대부분의 sBPF 연산은 레지스터가 64비트이므로 64비트 값(doubleword)을 사용하지만, 효율성을 위해 필요할 때 더 작은 크기를 로드하고 저장할 수 있습니다.
+
+<ArticleSection name="명령어 범주 및 형식" id="instruction-categories-and-format" level="h2" />
+
+Rust, C 또는 어셈블리 코드를 컴파일할 때 툴체인은 ELF의 `.text` 섹션에 압축된 고정 너비 8바이트 명령어 스트림을 방출합니다.
+
+각 명령어는 VM이 단일 패스로 디코딩할 수 있는 일관된 구조를 따릅니다:
+
+```
+   1 byte    4 bits   4 bits     2 bytes         4 bytes
+┌──────────┬────────┬────────┬──────────────┬──────────────────┐
+│  opcode  │  dst   │  src   │   offset     │      imm         │
+└──────────┴────────┴────────┴──────────────┴──────────────────┘
+```
+
+- `opcode`: 작업 유형을 정의합니다. 상위 3비트는 명령어 클래스(산술, 메모리, 점프, 호출, 종료)를 선택하고 하위 5비트는 정확한 변형(더하기, 곱하기, 로드, 같으면 점프)을 지정합니다.
+- `dst`: 결과가 저장되는 대상 레지스터 번호(`r0–r10`)입니다. 산술 결과, 로드된 값 또는 헬퍼 함수 반환값 등입니다.
+- `src`: 입력을 제공하는 소스 레지스터입니다. 2피연산자 산술(`add r1, r2`)의 경우 두 번째 값을 제공합니다. 메모리 연산의 경우 베이스 주소를 제공할 수 있습니다. 즉시 값 변형(`add r1, 10`)의 경우 이 4비트는 opcode로 접힙니다.
+- `offset`: 명령어 동작을 수정하는 작은 정수입니다. 로드/스토어의 경우 소스 주소에 추가되어 `[src + offset]`에 도달합니다. 점프의 경우 명령어로 측정된 상대 분기 대상입니다.
+- `imm`: 즉시 값 필드입니다. 산술 연산은 상수(`add r1, 42`)에 사용하고, `CALL`은 syscall 번호(`sol_log = 16`)에 사용하며, 메모리 연산은 이를 절대 포인터로 취급할 수 있습니다.
+
+### 명령어 범주
+
+다양한 명령어 유형은 이러한 필드를 특정 방식으로 사용합니다:
+
+- **데이터 이동 (Data Movement)**: 레지스터와 메모리 간에 값을 이동합니다:
+
+```sbpf
+mov64 r1, 42           // 즉시 값 42를 r1에 넣기
+                       // opcode=move_imm, dst=1, src=unused, imm=42
+
+ldxdw r0, [r10 - 8]    // 스택에서 r0로 8바이트 로드
+                       // opcode=load64, dst=0, src=10, offset=-8, imm=unused
+
+stxdw [r1 + 16], r0    // r0를 [r1 + 16]의 메모리에 저장
+                       // opcode=store64, dst=1, src=0, offset=16, imm=unused
+```
+- **산술 (Arithmetic)**: 수학적 연산을 수행합니다:
+
+```sbpf
+add64 r1, r2           // r1 = r1 + r2
+                       // opcode=add_reg, dst=1, src=2, offset=unused, imm=unused
+
+add64 r1, 100          // r1 = r1 + 100  
+                       // opcode=add_imm, dst=1, src=unused, offset=unused, imm=100
+```
+
+- **제어 흐름 (Control Flow)**: 실행 순서를 변경합니다:
+
+```sbpf
+ja +5                  // 무조건 5개 명령어 앞으로 점프
+                       // opcode=jump, dst=unused, src=unused, offset=5, imm=unused
+
+jeq r1, r2, +3         // r1 == r2이면 3개 명령어 앞으로 점프
+                       // opcode=jump_eq_reg, dst=1, src=2, offset=3, imm=unused
+
+jeq r1, 42, +3         // r1 == 42이면 3개 명령어 앞으로 점프
+                       // opcode=jump_eq_imm, dst=1, src=unused, offset=3, imm=42
+```
+
+### Opcode 인코딩
+
+Opcode 인코딩은 단순히 작업 유형을 넘어 여러 정보를 캡처합니다:
+- 명령어 클래스: 산술, 메모리, 점프, 호출 등
+- 작업 크기: 32비트 대 64비트 작업
+- 소스 유형: 레지스터 대 즉시 값
+- 특정 작업: 더하기 대 빼기, 로드 대 저장 등
+
+이것은 명령어 변형에 대해 별개의 opcode를 생성합니다. 예를 들어, `add64 r1, r2`(레지스터 소스)는 `add64 r1, 42`(즉시 값 소스)와 다른 opcode를 사용합니다. 마찬가지로 `add64`와 `add32`는 서로 다른 작업 크기에 대해 다른 opcode를 갖습니다.
+
+산술 연산은 서명된 변형과 서명되지 않은 변형을 더 구분합니다. `udiv64`는 값을 부호 없는 것(0에서 1800경)으로 취급하는 반면, `sdiv64`는 부호 있는 값(-900경에서 +900경)을 처리합니다.
+
+<ArticleSection name="명령어 실행" id="instruction-execution" level="h2" />
+
+Opcode는 VM이 나머지 필드를 해석하는 방법을 결정합니다.
+
+VM이 `add64 r1, r2`를 만나면 opcode를 읽고 이것이 두 레지스터를 사용하는 64비트 산술 연산임을 인식합니다:
+
+`dst` 필드는 결과가 `r1`으로 들어감을 나타내고, `src` 필드는 `r2`를 두 번째 피연산자로 지정하며, `offset` 및 `immediate` 필드는 무시됩니다.
+
+`add64 r1, 42`의 경우 opcode가 변경되어 즉시 값 연산을 나타냅니다. 이제 `dst`는 여전히 `r1`을 가리키지만 `src`는 의미가 없어지고 `immediate` 필드가 두 번째 피연산자(42)를 제공합니다.
+
+메모리 연산은 여러 필드를 의미 있게 결합합니다:
+
+`ldxdw r1, [r2+8]`의 경우 opcode는 64비트 메모리 로드를 나타내고, `dst`는 로드된 값을 받으며, `src`는 베이스 주소를 제공하고, `offset`(8)이 추가되어 최종 주소 `r2 + 8`을 생성합니다.
+
+제어 흐름 명령어는 동일한 패턴을 따릅니다:
+
+`jeq r1, r2, +5`를 작성할 때 opcode는 두 레지스터를 비교하는 조건부 점프를 인코딩합니다. `r1`이 `r2`와 같으면 VM은 `offset`(5)을 프로그램 카운터에 추가하여 5개 명령어 앞으로 점프합니다.
+
+> Opcode는 어떤 필드가 의미 있는지 결정합니다. 명령어 형식은 일정하게 유지됩니다. opcode는 각 필드를 해석하는 방법을 알려주어 복잡한 주소 지정 모드나 특수 사례를 제거합니다.
+
+### 함수 호출 및 Syscall
+
+sBPF의 호출 메커니즘은 더 나은 명확성과 보안을 위해 버전에 따라 발전했습니다. sBPF v3까지 `call imm`은 두 가지 목적을 수행했습니다. 즉시 값은 내부 함수를 호출하는지 또는 syscall을 호출하는지를 결정했습니다.
+
+런타임은 즉시 값 범위를 기반으로 이들을 구별했으며, syscall 번호는 일반적으로 `sol_log`의 경우 16과 같은 작은 양의 정수입니다.
+
+sBPF v3부터는 명시적 동작을 위해 명령어가 분리되었습니다. `call`은 이제 상대적 오프셋을 사용하여 내부 함수 호출을 처리하는 반면, `syscall imm`은 런타임 함수를 명시적으로 호출합니다. 이러한 분리는 바이트코드 의도를 명확하게 하고 더 나은 검증을 가능하게 합니다.
+
+`callx`를 통한 간접 호출도 발전했습니다. 초기 버전은 대상 레지스터를 즉시 값 필드에 인코딩했지만, v2부터는 일반적인 명령어 형식과의 일관성을 위해 소스 레지스터 필드에 인코딩됩니다.
+
+<ArticleSection name="Opcode 참조 표" id="opcodes-reference-table" level="h2" />
+
+### 메모리 로드 연산 (Memory Load Operations)
+
+| opcode | Mnemonic                 | Description                         |
+|--------|--------------------------|-------------------------------------|
+| lddw   | `lddw dst, imm`          | 64비트 즉시 값 로드 (첫 번째 슬롯)  |
+| lddw   | `lddw dst, imm`          | 64비트 즉시 값 로드 (두 번째 슬롯) |
+| ldxw   | `ldxw dst, [src + off]`  | 메모리에서 워드 로드               |
+| ldxh   | `ldxh dst, [src + off]`  | 메모리에서 하프워드 로드           |
+| ldxb   | `ldxb dst, [src + off]`  | 메모리에서 바이트 로드               |
+| ldxdw  | `ldxdw dst, [src + off]` | 메모리에서 더블워드 로드         |
+
+### 메모리 저장 연산 (Memory Store Operations)
+
+| opcode | Mnemonic                 | Description                    |
+|--------|--------------------------|--------------------------------|
+| stw    | `stw [dst + off], imm`   | 워드 즉시 값 저장           |
+| sth    | `sth [dst + off], imm`   | 하프워드 즉시 값 저장       |
+| stb    | `stb [dst + off], imm`   | 바이트 즉시 값 저장           |
+| stdw   | `stdw [dst + off], imm`  | 더블워드 즉시 값 저장     |
+| stxw   | `stxw [dst + off], src`  | 레지스터에서 워드 저장       |
+| stxh   | `stxh [dst + off], src`  | 레지스터에서 하프워드 저장   |
+| stxb   | `stxb [dst + off], src`  | 레지스터에서 바이트 저장       |
+| stxdw  | `stxdw [dst + off], src` | 레지스터에서 더블워드 저장 |
+
+### 산술 연산 (64비트) (Arithmetic Operations (64-bit))
+
+| opcode | Mnemonic          | Description                    |
+|--------|-------------------|--------------------------------|
+| add64  | `add64 dst, imm`  | 즉시 값 더하기                  |
+| add64  | `add64 dst, src`  | 레지스터 더하기                   |
+| sub64  | `sub64 dst, imm`  | 즉시 값 빼기             |
+| sub64  | `sub64 dst, src`  | 레지스터 빼기              |
+| mul64  | `mul64 dst, imm`  | 즉시 값 곱하기             |
+| mul64  | `mul64 dst, src`  | 레지스터 곱하기              |
+| div64  | `div64 dst, imm`  | 즉시 값 나누기 (부호 없음)    |
+| div64  | `div64 dst, src`  | 레지스터 나누기 (부호 없음)     |
+| sdiv64 | `sdiv64 dst, imm` | 즉시 값 나누기 (부호 있음)      |
+| sdiv64 | `sdiv64 dst, src` | 레지스터 나누기 (부호 있음)       |
+| mod64  | `mod64 dst, imm`  | 즉시 값 모듈로 (부호 없음)    |
+| mod64  | `mod64 dst, src`  | 레지스터 모듈로 (부호 없음)     |
+| smod64 | `smod64 dst, imm` | 즉시 값 모듈로 (부호 있음)      |
+| smod64 | `smod64 dst, src` | 레지스터 모듈로 (부호 있음)       |
+| neg64  | `neg64 dst`       | 부정 (Negate)                         |
+
+### 산술 연산 (32비트) (Arithmetic Operations (32-bit))
+
+| opcode | Mnemonic          | Description                    |
+|--------|-------------------|--------------------------------|
+| add32  | `add32 dst, imm`  | 즉시 값 더하기 (32-bit)         |
+| add32  | `add32 dst, src`  | 레지스터 더하기 (32-bit)          |
+| sub32  | `sub32 dst, imm`  | 즉시 값 빼기 (32-bit)    |
+| sub32  | `sub32 dst, src`  | 레지스터 빼기 (32-bit)     |
+| mul32  | `mul32 dst, imm`  | 즉시 값 곱하기 (32-bit)    |
+| mul32  | `mul32 dst, src`  | 레지스터 곱하기 (32-bit)     |
+| div32  | `div32 dst, imm`  | 즉시 값 나누기 (32-bit)      |
+| div32  | `div32 dst, src`  | 레지스터 나누기 (32-bit)       |
+| sdiv32 | `sdiv32 dst, imm` | 즉시 값 나누기 (부호 있음 32-bit) |
+| sdiv32 | `sdiv32 dst, src` | 레지스터 나누기 (부호 있음 32-bit)  |
+| mod32  | `mod32 dst, imm`  | 즉시 값 모듈로 (32-bit)      |
+| mod32  | `mod32 dst, src`  | 레지스터 모듈로 (32-bit)       |
+| smod32 | `smod32 dst, imm` | 즉시 값 모듈로 (부호 있음 32-bit) |
+| smod32 | `smod32 dst, src` | 레지스터 모듈로 (부호 있음 32-bit)  |
+
+### 논리 연산 (64비트) (Logical Operations (64-bit))
+
+| opcode | Mnemonic          | Description                    |
+|--------|-------------------|--------------------------------|
+| or64   | `or64 dst, imm`   | 비트 OR 즉시 값           |
+| or64   | `or64 dst, src`   | 비트 OR 레지스터            |
+| and64  | `and64 dst, imm`  | 비트 AND 즉시 값          |
+| and64  | `and64 dst, src`  | 비트 AND 레지스터           |
+| lsh64  | `lsh64 dst, imm`  | 왼쪽 시프트 즉시 값           |
+| lsh64  | `lsh64 dst, src`  | 왼쪽 시프트 레지스터            |
+| rsh64  | `rsh64 dst, imm`  | 오른쪽 시프트 즉시 값          |
+| rsh64  | `rsh64 dst, src`  | 오른쪽 시프트 레지스터           |
+| xor64  | `xor64 dst, imm`  | 비트 XOR 즉시 값          |
+| xor64  | `xor64 dst, src`  | 비트 XOR 레지스터           |
+| mov64  | `mov64 dst, imm`  | 이동 즉시 값                 |
+| mov64  | `mov64 dst, src`  | 이동 레지스터                  |
+| arsh64 | `arsh64 dst, imm` | 산술 오른쪽 시프트 즉시 값     |
+| arsh64 | `arsh64 dst, src` | 산술 오른쪽 시프트 레지스터     |
+
+### 논리 연산 (32비트) (Logical Operations (32-bit))
+
+| opcode | Mnemonic          | Description                    |
+|--------|-------------------|--------------------------------|
+| or32   | `or32 dst, imm`   | 비트 OR 즉시 값 (32-bit)  |
+| or32   | `or32 dst, src`   | 비트 OR 레지스터 (32-bit)   |
+| and32  | `and32 dst, imm`  | 비트 AND 즉시 값 (32-bit) |
+| and32  | `and32 dst, src`  | 비트 AND 레지스터 (32-bit)  |
+| lsh32  | `lsh32 dst, imm`  | 왼쪽 시프트 즉시 값 (32-bit)  |
+| lsh32  | `lsh32 dst, src`  | 왼쪽 시프트 레지스터 (32-bit)   |
+| rsh32  | `rsh32 dst, imm`  | 오른쪽 시프트 즉시 값 (32-bit) |
+| rsh32  | `rsh32 dst, src`  | 오른쪽 시프트 레지스터 (32-bit)  |
+| xor32  | `xor32 dst, imm`  | 비트 XOR 즉시 값 (32-bit) |
+| xor32  | `xor32 dst, src`  | 비트 XOR 레지스터 (32-bit)  |
+| mov32  | `mov32 dst, imm`  | 이동 즉시 값 (32-bit)        |
+| mov32  | `mov32 dst, src`  | 이동 레지스터 (32-bit)         |
+| arsh32 | `arsh32 dst, imm` | 산술 오른쪽 시프트 즉시 값 (32-bit) |
+| arsh32 | `arsh32 dst, src` | 산술 오른쪽 시프트 레지스터 (32-bit) |
+
+### 제어 흐름 연산 (Control Flow Operations)
+
+| opcode | Mnemonic             | Description                                   |
+|--------|----------------------|-----------------------------------------------|
+| ja     | `ja off`             | 무조건 점프 (jump 0 = 다음으로 점프)    |
+| jeq    | `jeq dst, imm, off`  | 즉시 값과 같으면 점프                    |
+| jeq    | `jeq dst, src, off`  | 레지스터와 같으면 점프                     |
+| jgt    | `jgt dst, imm, off`  | 즉시 값보다 크면 점프 (부호 없음)     |
+| jgt    | `jgt dst, src, off`  | 레지스터보다 크면 점프 (부호 없음)      |
+| jge    | `jge dst, imm, off`  | 즉시 값보다 크거나 같으면 점프 (부호 없음) |
+| jge    | `jge dst, src, off`  | 레지스터보다 크거나 같으면 점프 (부호 없음)  |
+| jset   | `jset dst, imm, off` | 비트 설정 시 점프 (즉시 값 마스크)              |
+| jset   | `jset dst, src, off` | 비트 설정 시 점프 (레지스터 마스크)               |
+| jne    | `jne dst, imm, off`  | 즉시 값과 같지 않으면 점프                |
+| jne    | `jne dst, src, off`  | 레지스터와 같지 않으면 점프                 |
+| jsgt   | `jsgt dst, imm, off` | 즉시 값보다 크면 점프 (부호 있음)       |
+| jsgt   | `jsgt dst, src, off` | 레지스터보다 크면 점프 (부호 있음)        |
+| jsge   | `jsge dst, imm, off` | 즉시 값보다 크거나 같으면 점프 (부호 있음)   |
+| jsge   | `jsge dst, src, off` | 레지스터보다 크거나 같으면 점프 (부호 있음)    |
+| jlt    | `jlt dst, imm, off`  | 즉시 값보다 작으면 점프 (부호 없음)        |
+| jlt    | `jlt dst, src, off`  | 레지스터보다 작으면 점프 (부호 없음)         |
+| jle    | `jle dst, imm, off`  | 즉시 값보다 작거나 같으면 점프 (부호 없음)    |
+| jle    | `jle dst, src, off`  | 레지스터보다 작거나 같으면 점프 (부호 없음)     |
+| jslt   | `jslt dst, imm, off` | 즉시 값보다 작으면 점프 (부호 있음)          |
+| jslt   | `jslt dst, src, off` | 레지스터보다 작으면 점프 (부호 있음)           |
+| jsle   | `jsle dst, imm, off` | 즉시 값보다 작거나 같으면 점프 (부호 있음)      |
+| jsle   | `jsle dst, src, off` | 레지스터보다 작거나 같으면 점프 (부호 있음)       |
+
+### 함수 호출 연산 (Function Call Operations)
+
+| opcode | Mnemonic                    | Description                           |
+|--------|-----------------------------|---------------------------------------|
+| call   | `call imm` or `syscall imm` | 함수 또는 syscall 호출              |
+| callx  | `callx imm`                 | 간접 호출 (imm 필드의 레지스터) |
+| exit   | `exit` or `return`          | 함수에서 반환                  |
+
+### 바이트 스왑 연산 (Byte Swap Operations)
+
+| opcode   | Mnemonic      | Description                        |
+|----------|---------------|------------------------------------|
+| be16     | `be16 dst`    | 바이트 스왑 (16-bit)                 |
+| be32     | `be32 dst`    | 바이트 스왑 (32-bit)                 |
+| be64     | `be64 dst`    | 바이트 스왑 (64-bit)                 |
+| le16     | `le16 dst`    | 비트 마스크 (16-bit)                  |
+| le32     | `le32 dst`    | 비트 마스크 (32-bit)                  |
+| le64     | `le64 dst`    | No op (64-bit)                     |

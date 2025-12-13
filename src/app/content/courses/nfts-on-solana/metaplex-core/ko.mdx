@@ -1,0 +1,192 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Metaplex Core 프로그램 (Metaplex Core Program)
+
+Metaplex Core 프로그램은 Token Metadata 프로그램의 다중 계정 아키텍처에 내재된 복잡성과 비용 문제를 해결합니다. Token Metadata는 SPL-Token을 기반으로 하여 각 NFT마다 여러 계정을 필요로 하므로, 이는 사용자와 네트워크 모두에 부담을 주는 비싸고 부피가 큰 구현을 초래합니다.
+
+2024년에 출시된 Metaplex Core는 NFT 작업을 위해 특별히 설계된 초경량 프로그램을 나타냅니다. 이전 버전과 달리 Core는 SPL-Token 종속성 없이 독립적으로 작동하며, 자체 프로그램 로직을 통해 민팅, 전송, 소각 및 사용자 정의 가능한 동작을 처리합니다.
+
+이 차세대 표준은 유연한 플러그인 시스템을 통해 전반적인 네트워크 성능을 향상시키면서 민팅 비용을 크게 줄이는 단일 계정 설계를 채택합니다.
+
+<ArticleSection name="자산" id="assets" level="h2" />
+
+Metaplex Core의 혁신적인 측면은 민트 계정과 토큰 계정 간의 전통적인 분리를 제거하는 통합 계정 구조에 있습니다.
+
+NFT는 단일 보유자와의 고유한 소유권을 유지하므로, 프로그램은 지갑과 자산 간의 관계를 자산 계정 자체 내에 직접 저장합니다.
+
+원래의 토큰 계정 시스템이 민트 당 수천 명의 소유자를 관리하기 위해 생성되었다는 점을 고려할 때, 이는 대체 불가능 토큰에는 적용되지 않는 시나리오이므로 이러한 설계는 직관적으로 이해됩니다.
+
+자산(Asset) 구조는 최소 필드 요구 사항을 통해 이러한 효율성 중심 접근 방식을 보여줍니다:
+
+```rust
+#[derive(Clone, BorshSerialize, BorshDeserialize, Debug, ShankAccount, Eq, PartialEq)]
+pub struct AssetV1 {
+    /// 계정 식별자 (Discriminator)
+    pub key: Key,
+    /// 자산의 소유자
+    pub owner: Pubkey,
+    /// 자산의 업데이트 권한
+    pub update_authority: UpdateAuthority,
+    /// 자산의 이름
+    pub name: String,
+    /// 오프체인 데이터를 가리키는 자산의 URI
+    pub uri: String,
+    /// 압축 인덱싱에 사용되는 시퀀스 번호
+    pub seq: Option<u64>,
+}
+```
+
+이 구조는 기능적인 NFT 작업에 필요한 절대적인 최소 데이터를 나타냅니다.
+
+공급량은 항상 1이고, 소수점은 항상 0이며, 민트 권한은 설정되지 않은 상태로 유지되어야 하고, 동결 권한은 업데이트 권한 필드와 통합될 수 있으므로, 전통적인 `Mint` 계정 필드는 이 문맥에서 불필요해집니다.
+
+마찬가지로 대부분의 `Token` 계정 기능은 자산 구조에 직접 통합됩니다.
+
+명시적인 동결 메커니즘의 부재는 Core의 지능형 설계 철학을 보여줍니다.
+
+많은 자산이 사용하지 않는 기능을 위해 공간을 예약하는 대신, Core는 플러그인 시스템을 통해 동결 기능을 구현하여 사용하지 않는 필드를 유지하는 대신 필요에 따라 기능을 추가합니다.
+
+이 접근 방식은 동결 기능이 필요한 자산에 대한 전체 기능을 보존하면서 저장 비용을 최적화합니다.
+
+컬렉션 멤버십은 업데이트 권한 열거형 시스템을 통해 똑같이 사려 깊은 처리를 받습니다: 그룹화된 자산은 일반적으로 동일한 업데이트 권한을 공유하므로, Core는 이 관계를 활용하여 중복 필드 저장을 제거합니다:
+
+```rust
+pub enum UpdateAuthority {
+    None,
+    Address(Pubkey),
+    Collection(Pubkey),
+}
+```
+
+업데이트 권한 필드는 `None`을 통해 불변 자산을, 특정 주소를 통해 독립 자산을, 또는 부모 컬렉션으로부터 업데이트 권한을 상속받는 컬렉션 멤버를 나타냄으로써 세 가지 역할을 수행합니다.
+
+이 우아한 솔루션은 명확한 권한 관계와 컬렉션 멤버십 검증을 유지하면서 저장 요구 사항을 줄입니다.
+
+<ArticleSection name="컬렉션" id="collections" level="h2" />
+
+Metaplex Core의 컬렉션은 주제별, 창의적 또는 기능적 관계를 공유하는 그룹화된 자산 세트를 나타냅니다.
+
+외부 검증 시스템에 의존하는 전통적인 NFT 컬렉션과 달리, Core 컬렉션은 통합된 권한 구조를 통해 자산 간의 검증 가능한 온체인 관계를 확립합니다.
+
+컬렉션을 생성하는 것은 모든 멤버 자산에 대한 권위 있는 부모 계정 역할을 하는 컬렉션 자산(Collection Asset)을 확립하는 것으로 시작됩니다.
+
+이 컬렉션 자산은 컬렉션 이름, 설명 및 대표 이미지를 포함한 컬렉션 전체 정보에 대한 조직적 허브이자 메타데이터 저장소 역할을 합니다.
+
+컬렉션 계정은 또한 모든 멤버 자산에 적용되는 플러그인의 중앙 제어점 역할을 하여, 창작자가 전체 컬렉션에 걸쳐 일관된 동작을 구현할 수 있게 합니다.
+
+```rust
+pub struct CollectionV1 {
+    /// 계정 식별자 (Discriminator)
+    pub key: Key, //1
+    /// 컬렉션의 업데이트 권한
+    pub update_authority: Pubkey, //32
+    /// 컬렉션의 이름
+    pub name: String, //4
+    /// 컬렉션에 대해 표시할 데이터에 연결되는 URI
+    pub uri: String, //4
+    /// 컬렉션에서 발행된 자산의 수
+    pub num_minted: u32, //4
+    /// 현재 컬렉션에 있는 자산의 수
+    pub current_size: u32, //4
+}
+```
+
+컬렉션 구조는 `num_minted` 및 `current_size` 필드를 통해 중요한 통계를 유지하며, 이는 컬렉션 내에서 생성된 총 자산 수와 활성 상태로 남아 있는 현재 자산 수를 추적합니다.
+
+이러한 지표는 정확한 컬렉션 분석을 가능하게 하고 외부 인덱싱 서비스 없이 한정판 출시나 소각 추적과 같은 기능을 지원합니다.
+
+자산이 `update_authority`를 `Collection(collection_pubkey)`로 설정하면, 검증 가능한 멤버십을 확립하면서 자동으로 컬렉션의 권한 구조를 상속받습니다. 이 설계는 별도의 검증 계정이나 외부 증명 시스템의 필요성을 제거하여 완전히 온체인에서 검증될 수 있는 불변의 컬렉션 관계를 생성합니다.
+
+<ArticleSection name="플러그인" id="plugins" level="h2" />
+
+플러그인 시스템은 Metaplex Core의 가장 혁신적인 기능으로, 초기 NFT 표준을 특징짓는 경직되고 미리 정의된 동작의 한계를 해결합니다.
+
+레거시 Token Metadata 프로그램은 사용자 정의 기능을 위해 프로그래밍 가능한 NFT와 같은 복잡한 해결책을 필요로 했지만, Core의 플러그인 아키텍처는 단순성이나 성능을 희생하지 않고 세분화된 사용자 정의를 가능하게 합니다.
+
+Core의 혁신적인 접근 방식은 온체인 데이터를 고정된 구조에 가두는 대신 유연하게 처리합니다. 이 설계 철학은 효율적인 계정 관리를 유지하면서 다양한 사용 사례를 제공하는 유연한 플러그인 기반 시스템을 가능하게 합니다.
+
+각 플러그인은 자체 권한 모델을 정의하여 특정 작업을 수행할 수 있는 사람을 정확히 지정하는 반면, Core의 검증 시스템은 서로 다른 권한과 허가 간의 충돌을 방지합니다.
+
+계정 아키텍처는 두 개의 뚜렷한 구성 요소로 나뉩니다:
+- 예측 가능한 필드 길이를 가진 필수 자산 정보를 포함하는 핵심 데이터 섹션
+- 추가 기능 및 사용자 정의 동작이 존재하는 선택적 플러그인 메타데이터 섹션
+
+이러한 분리는 기본 자산이 가볍게 유지되면서 복잡한 기능은 필요에 따라 확장되도록 보장합니다.
+
+플러그인 메타데이터는 헤더, 개별 플러그인, 그리고 모든 것을 조정하는 레지스트리의 세 부분 구조를 통해 스스로를 구성합니다.
+
+```
+Header | Plugin1 | Plugin2 | Plugin3 | Registry
+```
+
+플러그인 헤더는 진입점 역할을 하며, 계정 내 레지스트리의 위치를 나타내는 `plugin_registry_offset` 포인터를 포함합니다:
+
+```rust
+pub struct PluginHeaderV1 {
+    /// 플러그인 메타데이터 버전 역할도 하는 헤더의 식별자
+    pub key: Key, // 1
+    /// 계정 끝에 저장된 플러그인 레지스트리에 대한 오프셋
+    pub plugin_registry_offset: usize, // 8
+}
+```
+
+플러그인 레지스트리는 조정 센터 역할을 하며, 내부 `RegistryRecord` 항목과 타사 플러그인을 위한 `ExternalRegistryRecord` 항목의 벡터를 모두 유지합니다.
+
+각 레코드에는 플러그인 유형, 관리 권한 및 계정 내 오프셋 위치가 포함됩니다:
+
+```rust
+pub struct PluginRegistryV1 {
+    /// 플러그인 메타데이터 버전 역할도 하는 헤더의 식별자
+    pub key: Key, // 1
+    /// 모든 플러그인의 레지스트리
+    pub registry: Vec<RegistryRecord>, // 4
+    /// 모든 어댑터, 타사 플러그인의 레지스트리
+    pub external_registry: Vec<ExternalRegistryRecord>, // 4
+}
+
+pub struct RegistryRecord {
+    /// 플러그인 유형
+    pub plugin_type: PluginType, // 2
+    /// 플러그인을 사용할 권한이 있는 권한자
+    pub authority: Authority, // Variable
+    /// 계정 내 플러그인에 대한 오프셋
+    pub offset: usize, // 8
+}
+
+pub struct ExternalRegistryRecord {
+    /// 어댑터, 타사 플러그인 유형
+    pub plugin_type: ExternalPluginAdapterType,
+    /// 외부 플러그인 어댑터의 권한자
+    pub authority: Authority,
+    /// 외부 플러그인 어댑터가 활성화되는 수명 주기 이벤트
+    pub lifecycle_checks: Option<Vec<(HookableLifecycleEvent, ExternalCheckResult)>>,
+    /// 계정 내 플러그인에 대한 오프셋
+    pub offset: usize, // 8
+    /// 데이터가 있는 플러그인의 경우, 계정 내 데이터에 대한 오프셋
+    pub data_offset: Option<usize>,
+    /// 데이터가 있는 플러그인의 경우, 계정 내 데이터의 길이
+    pub data_len: Option<usize>,
+}
+```
+
+플러그인 검색은 이 구성된 구조를 활용하는 체계적인 프로세스를 따릅니다.
+
+시스템은 먼저 자산 데이터를 로드하여 플러그인 헤더 위치를 확인한 다음, 헤더의 오프셋을 사용하여 레지스트리를 찾고, 마지막으로 레지스트리 레코드를 반복하여 전체 플러그인 목록을 컴파일합니다:
+
+```rust
+pub fn list_plugins(account: &AccountInfo) -> Result<Vec<PluginType>, ProgramError> {
+    let asset = AssetV1::load(account, 0)?;
+    if asset.get_size() == account.data_len() {
+        return Err(MplCoreError::PluginNotFound.into());
+    }
+    let header = PluginHeaderV1::load(account, asset.get_size())?;
+    let PluginRegistryV1 { registry, .. } =
+        PluginRegistryV1::load(account, header.plugin_registry_offset)?;
+    Ok(registry
+        .iter()
+        .map(|registry_record| registry_record.plugin_type)
+        .collect())
+}
+```
+
+> `Core` 프로그램 사용 방법에 대해 자세히 알아보려면 [공식 문서](https://developers.metaplex.com/core)를 참조하세요.

@@ -1,0 +1,111 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 재초기화 공격 (Reinitialization Attacks)
+
+재초기화 공격은 계정이 이미 초기화되었는지 확인하지 못하는 프로그램을 악용하여 공격자가 기존 데이터를 덮어쓰고 귀중한 계정의 제어권을 탈취할 수 있도록 합니다.
+
+초기화는 합법적으로 처음 사용할 새 계정을 설정하는 반면, 재초기화는 기존 계정을 공격자가 제어하는 상태로 악의적으로 재설정합니다.
+
+적절한 초기화 검증이 없으면 공격자는 이미 사용 중인 계정에서 초기화 함수를 호출하여 확립된 프로그램 상태를 적대적으로 인수할 수 있습니다. 이는 에스크로, 금고 또는 계정 소유권이 귀중한 자산에 대한 통제권을 결정하는 모든 시스템과 같은 프로토콜에서 특히 치명적입니다.
+
+초기화는 새 계정의 데이터를 처음으로 설정합니다. 기존 데이터를 덮어쓰지 않도록 계정이 이미 초기화되었는지 확인하는 것이 필수적입니다.
+
+<ArticleSection name="Anchor" id="anchor" level="h2" />
+
+프로그램 계정을 초기화하는 이 취약한 명령어를 고려하십시오:
+
+```rust
+#[program]
+pub mod unsafe_initialize_account{
+    use super::*;
+
+    //..
+
+    pub fn unsafe_initialize_account(ctx: Context<InitializeAccount>) -> Result<()> {
+        let mut writer: Vec<u8> = vec![];
+
+        ProgramAccount {
+            owner: ctx.accounts.owner.key()
+        }.try_serialize(&mut writer)?;
+
+        let mut data = ctx.accounts.program_account.try_borrow_mut_data()?;
+        sol_memcpy(&mut data, &writer, writer.len());
+
+        Ok(())
+    }
+
+    //..
+}
+
+#[derive(Accounts)]
+pub struct InitializeAccount<'info> {
+    pub owner: Signer<'info>,
+    #[account(mut)]
+    /// CHECK: This account will not be checked by Anchor
+    pub program_account: UncheckedAccount<'info>,
+}
+
+#[account]
+pub struct ProgramAccount {
+    owner: Pubkey,
+}
+```
+
+이 코드는 치명적인 결함을 가지고 있습니다. 계정이 이미 초기화되었는지 확인하지 않습니다. 이 명령어가 호출될 때마다 계정의 이전 상태에 관계없이 무조건 계정 데이터를 덮어쓰고 호출자를 새 소유자로 설정합니다.
+
+공격자는 다음을 통해 이를 악용할 수 있습니다:
+- 귀중한 초기화된 계정 식별 (토큰 계정을 제어하는 에스크로 PDA와 같은)
+- 해당 기존 계정으로 `unsafe_initialize_account` 호출
+- 이전 소유자 데이터를 덮어써서 새로운 "소유자"가 됨
+- 해당 계정이 제어하는 모든 자산을 고갈시키기 위해 새로 찾은 소유권 사용
+
+이 공격은 에스크로 시나리오에서 특히 치명적입니다. 수천 달러 상당의 자산이 포함된 토큰 계정을 소유한 에스크로 PDA를 상상해 보십시오. 원래 에스크로 초기화는 합법적인 참여자로 계정을 올바르게 설정했습니다. 그러나 공격자가 재초기화 함수를 호출할 수 있다면 에스크로 데이터를 덮어쓰고 자신을 소유자로 설정하고 모든 에스크로된 토큰에 대한 통제권을 얻을 수 있습니다.
+
+다행히 `Anchor`를 사용하면 계정을 초기화할 때 `init` 제약 조건을 사용하여 계정 구조체에서 직접 이 검사를 매우 쉽게 수행할 수 있습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct InitializeAccount<'info> {
+    pub owner: Signer<'info>,
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + ProgramAccount::INIT_SPACE
+    )]
+    pub program_account: Account<'info, ProgramAccount>,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct ProgramAccount {
+    owner: Pubkey,
+}
+```
+
+또는 다음과 같이 `ctx.accounts.program_account.is_initialized` 확인을 사용하여 명령어에서 계정이 이미 초기화되었는지 확인할 수 있습니다:
+
+```rust
+pub fn update_ownership(ctx: Context<UpdateOwnership>) -> Result<()> {
+    if ctx.accounts.program_account.is_initialized {
+        return Err(ProgramError::AccountAlreadyInitialized.into());
+    }
+
+    Ok(())
+}
+```
+
+> 기능 플래그에 의해 보호되는 Anchor의 `init_if_needed` 제약 조건은 각별히 주의해서 사용해야 합니다. 계정이 아직 초기화되지 않은 경우에만 편리하게 초기화하지만 위험한 함정을 만듭니다. 계정이 이미 초기화된 경우 명령어 핸들러는 정상적으로 실행을 계속합니다. 즉, 프로그램이 자신도 모르게 기존 계정에서 작동하여 중요한 데이터를 덮어쓰거나 무단 액세스를 허용할 수 있습니다.
+
+<ArticleSection name="Pinocchio" id="pinocchio" level="h2" />
+
+Pinocchio에서는 계정 구조체 내부에 보안 검사를 직접 추가할 수 없으므로 명령어 로직에서 수행해야 합니다.
+
+계정에 올바른 구별자가 있는지 확인하여 이를 수행할 수 있습니다:
+
+```rust
+let account_data = self.accounts.program_account.try_borrow_data()?;
+
+if account_data[0] == DISCRIMINATOR {
+    return Err(ProgramError::AccountAlreadyInitialized.into());
+}
+```

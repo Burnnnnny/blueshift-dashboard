@@ -1,0 +1,94 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# CPI 가드 확장 (The Cpi Guard Extension)
+
+`CpiGuard` 확장은 크로스 프로그램 호출 내부에서 특정 작업을 금지하여 명시적 동의 없이 토큰 계정을 조작하려는 악성 프로그램으로부터 사용자를 보호하는 `Token` 계정 확장입니다.
+
+<ArticleSection name="Token 계정 초기화" id="initializing-the-token-account" level="h2" />
+
+`Token` 계정에 `CpiGuard` 확장을 초기화하려면 `enableCpiGuard()` 함수가 필요합니다.
+
+CPI 가드 확장으로 토큰을 만드는 방법은 다음과 같습니다:
+
+```ts
+import {
+    Keypair,
+    SystemProgram,
+    Transaction,
+    sendAndConfirmTransaction,
+} from '@solana/web3.js';
+import {
+    createInitializeAccountInstruction,
+    createEnableCpiGuardInstruction,
+    getAccountLen,
+    ExtensionType,
+    TOKEN_2022_PROGRAM_ID,
+} from '@solana/spl-token';
+
+const tokenAccount = Keypair.generate();
+
+// Calculate the size needed for a Token account with Cpi Guard extension
+const accountLen = getAccountLen([ExtensionType.CpiGuard]);
+
+// Calculate minimum lamports required for rent exemption
+const lamports = await connection.getMinimumBalanceForRentExemption(accountLen);
+
+// Create the account with the correct size and owner
+const createAccountInstruction = SystemProgram.createAccount({
+    fromPubkey: keypair.publicKey,
+    newAccountPubkey: tokenAccount.publicKey,
+    space: accountLen,
+    lamports,
+    programId: TOKEN_2022_PROGRAM_ID,
+});
+
+// Initialize the Cpi Guard extension
+const enableCpiGuardInstruction = createEnableCpiGuardInstruction(
+    tokenAccount.publicKey,
+    keypair.publicKey,
+    undefined,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+// Initialize the Token account itself
+const initializeAccountInstruction = createInitializeAccountInstruction(
+    tokenAccount.publicKey,
+    mint.publicKey,
+    keypair.publicKey,
+    TOKEN_2022_PROGRAM_ID,
+);
+
+const transaction = new Transaction().add(
+    createAccountInstruction,
+    initializeAccountInstruction,
+    enableCpiGuardInstruction
+);
+
+const signature = await sendAndConfirmTransaction(connection, transaction, [keypair, tokenAccount], {skipPreflight: false});
+
+console.log(`Token accounts created! Check out your TX here: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+```
+
+<ArticleSection name="CPI 가드 비활성화" id="disabling-the-cpi-guard" level="h2" />
+
+CPI 가드에 의해 차단된 동작 중 일부를 활성화하려면 다음과 같이 `disableCpiGuard` 명령어를 사용하여 가드를 쉽게 비활성화할 수 있습니다:
+
+```ts
+const disableCpiGuardInstruction = createDisableCpiGuardInstruction(
+    tokenAccount,
+    keypair.publicKey,
+    undefined,
+    TOKEN_2022_PROGRAM_ID,
+);
+```
+
+완료 후 보안 계층을 다시 추가하려면 다음과 같이 `enableCpiGuard` 명령어를 사용하여 다시 활성화할 수 있습니다:
+
+```ts
+const enableCpiGuardInstruction = createEnableCpiGuardInstruction(
+    tokenAccount,
+    keypair.publicKey,
+    undefined,
+    TOKEN_2022_PROGRAM_ID,
+);
+```

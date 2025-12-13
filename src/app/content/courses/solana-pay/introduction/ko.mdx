@@ -1,0 +1,118 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Solana Pay
+
+![Solana Pay](/graphics/course-banners/solana-pay.png)
+
+Solana Pay는 Solana에서 즉각적이고 거의 제로에 가까운 수수료로 트랜잭션을 가능하게 하는 오픈 소스 결제 프레임워크입니다.
+
+Shopify 통합을 통해 이미 수백만 개의 비즈니스에서 신뢰하고 있으며, 기존 결제 중개자를 완전히 제거하여 상거래를 혁신합니다.
+
+> Solana Pay는 URL을 통해 결제를 표준화합니다. 복잡한 지갑 통합 대신 모든 Solana 지갑에서 자동으로 작동하는 간단한 링크를 만듭니다.
+
+<ArticleSection name="핵심 기능" id="core-functionalities" level="h2" />
+
+Solana Pay의 특징은 다음과 같습니다:
+- **직접 정산 (Direct Settlement):** 결제는 SOL 또는 모든 SPL 토큰으로 고객 지갑에서 가맹점 지갑으로 바로 이동합니다. 은행, 프로세서 또는 중개인이 수수료를 떼지 않습니다.
+- **즉시 완결성 (Instant Finality):** Solana의 1초 미만 정산 덕분에 확인 시 자금이 즉시 도착합니다.
+- **보편적 호환성 (Universal Compatibility):** 하나의 구현으로 모든 Solana 지갑 및 애플리케이션과 작동합니다.
+
+두 가지 기본 요청 유형을 통한 모든 것:
+
+### 전송 요청 (단순 결제)
+
+미리 결정된 트랜잭션을 위한 비대화형 URL입니다. 모든 것이 URL에 인코딩됩니다.
+
+```
+solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?amount=0.01&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+```
+
+> 용도: 전자 상거래 체크아웃, 기부, 구독, 모든 단순 토큰 전송.
+
+### 트랜잭션 요청 (동적 결제)
+
+서버 측에서 복잡한 트랜잭션을 구성하는 대화형 URL입니다.
+
+지갑은 서버에 HTTP 요청을 보내고, 서버는 실시간 데이터로 구축된 사용자 지정 트랜잭션을 반환합니다.
+
+> 용도: 동적 가격 책정이 있는 NFT, DeFi 상호 작용, 로열티 프로그램, 복잡한 비즈니스 로직.
+
+### 통합 옵션
+
+Solana Pay는 다음을 제공합니다:
+- **QR 코드:** 즉각적인 직접 결제
+- **공유 가능한 링크:** 모든 플랫폼에서 작동
+- **임베디드 버튼:** 원활한 체크아웃 경험
+- **사용자 지정 흐름:** 다자간 트랜잭션, 조건부 액세스, 부분 서명
+
+<ArticleSection name="중요한 이유" id="why-it-matters" level="h2" />
+
+Solana Pay는 전체 기존 결제 스택을 간단한 URL로 대체합니다. 여러 지갑과 통합하고 복잡한 트랜잭션 흐름을 처리하는 대신 어디서나 자동으로 작동하는 표준화된 링크를 만듭니다.
+
+**전통적인 결제 흐름:** 고객 → 은행 → 결제 프로세서 → 귀하의 은행 → 귀하 (며칠 후, 수수료 제외)
+
+**Solana Pay 흐름:** 고객 → 귀하 (즉시, 거의 제로 수수료)
+
+> Solana Pay 사양은 복잡한 지갑 통합을 어디서나 작동하는 간단하고 표준화된 URL로 대체하여 블록체인 결제를 근본적으로 변화시킵니다.
+
+<ArticleSection name="참조 (Reference)" id="reference" level="h2" />
+
+참조는 Solana Pay 스택의 가장 중요한 부분 중 하나입니다. 백엔드는 트랜잭션을 네트워크에 제출하지 않고 지갑이 서명하는 트랜잭션 응답만 반환하므로 결제가 완료되었는지 확인하는 데 도움이 되는 트랜잭션 서명이 없습니다.
+
+`reference`는 트랜잭션에서 서명자가 아니며 쓰기 불가능한 계정으로 포함된 고유한 공개 키입니다. 트랜잭션 동작에는 영향을 미치지 않지만 추적 식별자 역할을 합니다.
+
+흐름은 다음과 같습니다:
+1. 각 결제 요청에 대한 고유 참조(공개 키) 생성
+2. 트랜잭션 요청 URL에 파라미터로 포함
+3. 비서명자 계정으로 트랜잭션 명령어에 추가
+4. 참조를 사용하여 트랜잭션 추적
+
+Solana의 `getSignaturesForAddress` RPC 메서드 또는 `solana/pay` 라이브러리의 `findReference` 헬퍼를 사용하여 다음과 같이 참조가 포함된 트랜잭션을 찾을 수 있습니다:
+
+```ts
+useEffect(() => {
+    // Poll the network for transactions that include the reference address
+    const interval = setInterval(async () => {
+        try {
+            // Find transactions that include the reference address
+            const signatureInfo = await findReference(connection, reference, {
+                until: mostRecentNotifiedTransaction.current, // Only look for transactions after the most recent one we've found
+                finality: "confirmed",
+            });
+            // Update the most recent transaction with the transaction we just found
+            mostRecentNotifiedTransaction.current = signatureInfo.signature;
+            // Toast notification
+            displayToast(signatureInfo.signature);
+        } catch (e) {
+            if (e instanceof FindReferenceError) {
+                // No transaction found yet, ignore this error
+                return;
+            }
+            console.error("Unknown error", e);
+        }
+    }, 1000); // Check for new transactions every second
+    
+    return () => {
+        clearInterval(interval);
+    };
+}, [reference]);
+```
+
+<ArticleSection name="QR 코드 생성" id="qr-code-generation" level="h2" />
+
+`@solana/pay` 라이브러리를 사용하여 모든 트랜잭션 요청을 스캔 가능한 QR 코드로 변환하십시오:
+
+```ts
+import { createQR, encodeURL, TransactionRequestURLFields } from '@solana/pay'; 
+
+const urlParams: TransactionRequestURLFields = {
+  link: new URL("https://yourapi.com/pay"),
+};
+const solanaUrl = encodeURL(urlParams);
+
+const qr = createQR(
+  solanaUrl,
+  400,
+  "transparent"
+);
+```

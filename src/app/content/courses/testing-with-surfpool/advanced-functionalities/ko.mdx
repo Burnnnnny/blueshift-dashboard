@@ -1,0 +1,168 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 고급 기능 (Advanced Functionalities)
+
+Surfnet은 로컬넷에서 메인넷을 복제하는 것을 넘어 계정, 시스템 변수 및 블록체인 상태를 변경하여 핵심 Solana 기능을 향상하고 수정할 수 있게 해줍니다.
+
+이러한 수정은 Surfnet에 대한 RPC 호출을 통해 이루어지며 프로그래밍 방식(자동화된 테스트 환경용)과 터미널 명령(일회성 작업용)을 통해 변경할 수 있습니다.
+
+코드에서 RPC 호출을 실행하려면 다음을 사용하십시오:
+
+```ts
+const surfnetCall = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "<surfnet-method>",
+    "params": [<surfnet-method-params]
+}
+
+await fetch(connection.rpcEndpoint, {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(surfnetCall)
+});
+```
+
+터미널에서 RPC 호출을 실행하려면 다음을 사용하십시오:
+
+```bash
+curl -X POST \
+    -H "Content-Type: application/json" \
+    -d '{
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "<surfnet-method>",
+        "params": [<surfnet-method-params]
+    }' \
+    http://localhost:8899
+```
+
+<ArticleSection name="시스템 변수 사용자 지정" id="customize-system-variables" level="h2" />
+
+### 시간 여행 (Time Travel)
+
+`surfnet_timeTravel` 메서드를 사용하여 블록체인 기록의 어느 지점으로든 이동하십시오. 이는 다양한 네트워크 상태에서 프로그램이 어떻게 동작하는지 테스트하거나 특정 시간에 발생한 버그를 재현하는 데 매우 유용합니다.
+
+다음과 같이 `absoluteEpoch`, `absoluteSlot` 또는 `absoluteTimestamp` 중 하나를 지정하십시오:
+
+```ts
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "surfnet_timeTravel",
+  "params": [
+    {
+      "absoluteEpoch": 0
+    }
+  ]
+}
+```
+
+### 블록 생성 일시 중지 및 재개
+
+블록 진행을 제어하여 트랜잭션을 단계별로 디버깅하거나 시간에 민감한 로직을 테스트하십시오. `surfnet_pauseClock`을 사용하여 블록 생성을 중지하고 `surfnet_resumeClock`을 사용하여 계속하십시오:
+
+```ts
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "surfnet_pauseClock", // or "surfnet_resumeClock"
+  "params": []
+}
+```
+
+<ArticleSection name="계정 데이터 수정" id="modify-account-data" level="h2" />
+
+### SOL 파라미터 설정
+
+경제 시나리오 또는 엣지 케이스를 테스트하기 위해 SOL 공급 파라미터를 구성하십시오.
+
+`surfnet_setSupply` 메서드는 `circulating`, `nonCirculating`, `nonCirculatingAccounts` 및 `total` 파라미터를 허용합니다:
+
+```ts
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "surfnet_setSupply",
+  "params": [
+    {
+      "circulating": 1000000000,
+      "nonCirculating": 1000000000,
+      "nonCirculatingAccounts": [],
+      "total": 1000000000
+    }
+  ]
+}
+```
+
+### 프로그램 간 계정 전송
+
+`surfnet_cloneProgramAccount`를 사용하여 한 프로그램에서 다른 프로그램으로 프로그램 계정을 복제하십시오. 프로그램 업그레이드를 테스트하거나 서로 다른 프로그램 버전 간에 상태를 마이그레이션하는 데 유용합니다.
+
+`destinationProgramId`와 `sourceProgramId`가 모두 필요합니다:
+
+```ts
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "surfnet_cloneProgramAccount",
+  "params": [
+    {
+      "destinationProgramId": "string",
+      "sourceProgramId": "string"
+    }
+  ]
+}
+```
+
+### 계정 데이터 업데이트
+
+> 다음 메서드를 사용하여 이미 존재하는 계정을 업데이트하면 계정 상태를 덮어씁니다.
+
+`surfnet_setAccount`를 사용하여 lamports, 데이터, 소유자 및 실행 가능 상태를 포함한 모든 계정의 속성을 수정하십시오.
+
+이 메서드는 `pubkey`가 필요하며 `data`, `executable`, `lamports`, `owner` 및 `rentEpoch`에 대한 선택적 필드를 허용합니다:
+
+```ts
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "surfnet_setAccount",
+  "params": [
+    "1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM",
+    {
+      "data": "0x123456",
+      "executable": false,
+      "lamports": 1000000000,
+      "owner": "11111111111111111111111111111111",
+      "rentEpoch": 0
+    }
+  ]
+}
+```
+
+또한 토큰 계정 수정의 경우 특수 `surfnet_setTokenAccount` 메서드를 사용하십시오. 이 메서드는 토큰 계정의 데이터 변경을 단순화합니다.
+
+`owner` 및 `mint` 파라미터가 필요하며 `amount`, `closeAuthority`, `delegate`, `delegateAmount`, `state` 및 `tokenProgram`에 대한 선택적 필드가 있습니다:
+
+```ts
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "surfnet_setTokenAccount",
+  "params": [
+    "1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh",
+    "11111112D1oxKts8YPdTJRG5FzxTNpMtWmq8hkVx3",
+    {
+      "amount": 1000000000,
+      "closeAuthority": "111111131h1vYVSYuKP6AhS86fbRdMw9XHiZAvAaj",
+      "delegate": "11111112cMQwSC9qirWGjZM6gLGwW69X22mqwLLGP",
+      "delegatedAmount": 1000000000,
+      "state": "initialized"
+    },
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+  ]
+}
+```

@@ -1,0 +1,185 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 트랜잭션 요청 (Transaction Request)
+
+트랜잭션 요청은 모든 유형의 Solana 작업을 처리할 수 있는 동적인 서버 구성 트랜잭션을 가능하게 하여 Solana Pay의 잠재력을 최대한 발휘합니다.
+
+URL에 모든 결제 정보가 포함된 전송 요청과 달리 트랜잭션 요청은 대화형 엔드포인트를 사용하여 실시간 데이터 및 비즈니스 로직을 기반으로 사용자 지정 트랜잭션을 구축합니다.
+
+이 접근 방식은 Solana Pay를 단순한 결제 시스템에서 복잡한 비즈니스 시나리오, 동적 가격 책정 및 정교한 트랜잭션 흐름을 처리할 수 있는 완전한 상거래 플랫폼으로 변화시킵니다.
+
+<ArticleSection name="트랜잭션 요청 작동 방식" id="how-it-works" level="h2" />
+
+트랜잭션 요청은 서버 엔드포인트를 가리키는 간단한 URL 형식을 따릅니다:
+
+```
+solana:<link>
+```
+
+`link` 값은 `GET` 및 `POST` 요청을 모두 처리하는 API 엔드포인트의 URL이어야 합니다. 사용자가 트랜잭션 요청 QR 코드를 스캔하면 지갑은 4단계 프로세스를 시작합니다:
+1. **초기 GET 요청**: 비즈니스 이름 및 로고와 같은 표시 정보를 검색합니다.
+2. **사용자 확인**: 지갑이 사용자에게 비즈니스 정보를 표시합니다.
+3. **POST 요청**: 사용자의 공개 키를 엔드포인트로 보냅니다.
+4. **트랜잭션 응답**: 서버가 사용자 지정 트랜잭션을 구축하고 base64 인코딩 문자열로 반환합니다.
+
+그런 다음 지갑은 승인 및 서명을 위해 이 트랜잭션을 사용자에게 제시합니다.
+
+> 다음과 같이 URL에 파라미터를 포함하여 엔드포인트에서 액세스할 수 있습니다:
+
+```
+solana:https://myapi.com/pay?amount=100&product=premium&reference=abc123
+```
+
+<ArticleSection name="API 엔드포인트 구축" id="api-endpoint" level="h2" />
+
+트랜잭션 요청 엔드포인트를 만들려면 동일한 URL에서 GET 및 POST 요청을 모두 처리해야 합니다. 다음은 Next.js App Router를 사용한 구조입니다:
+
+```ts
+import { NextRequest, NextResponse } from 'next/server';
+
+// CORS headers for wallet compatibility
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 200, headers: corsHeaders });
+}
+
+export async function GET() {
+  // Implementation details below...
+}
+
+export async function POST(request: NextRequest) {
+  // Implementation details below...
+}
+```
+
+> 지갑은 엔드포인트에 크로스 오리진 요청을 하므로 CORS 헤더는 필수입니다. 없으면 지갑 요청이 실패합니다.
+
+### GET 요청 핸들러
+
+GET 요청은 사용자가 상호 작용하는 내용을 이해하는 데 도움이 되는 표시 정보를 제공합니다:
+
+```ts
+export async function GET() {
+  return NextResponse.json({
+    label: "Coffee Shop Demo",
+    icon: "https://solana.com/src/img/branding/solanaLogoMark.svg",
+  }, { headers: corsHeaders });
+}
+```
+
+**응답 형식:**
+
+```json
+{
+  "label": "Coffee Shop Demo",
+  "icon": "https://solana.com/src/img/branding/solanaLogoMark.svg"
+}
+```
+
+이 정보는 사용자가 실제 트랜잭션 구성을 진행하기 전에 상호 작용하려는 내용을 이해하는 데 도움이 됩니다.
+
+### POST 요청 핸들러
+
+POST 요청은 트랜잭션 요청이 진정으로 빛나는 곳입니다. 엔드포인트는 사용자의 공개 키를 수신하고 완전히 사용자 지정된 트랜잭션을 구축합니다:
+
+```ts
+export async function POST(request: NextRequest) {
+  // Parse user's public key from request body
+  const body = await request.json();
+  const { account } = body;
+
+  // Connect to Solana network
+  const connection = new Connection(clusterApiUrl("devnet"));
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+
+  // Create transaction with user as fee payer
+  const transaction = new Transaction({
+    feePayer: new PublicKey(account),
+    blockhash: blockhash,
+    lastValidBlockHeight: lastValidBlockHeight,
+  });
+
+  // ========================================
+  // ADD YOUR CUSTOM INSTRUCTIONS HERE
+  // ========================================
+  
+  // This is where you build your transaction logic.
+  // You can add any combination of instructions:
+  
+  // Example 1: Simple SOL transfer
+  // const transferInstruction = SystemProgram.transfer({
+  //   fromPubkey: new PublicKey(account),
+  //   toPubkey: new PublicKey("YOUR_MERCHANT_WALLET"),
+  //   lamports: LAMPORTS_PER_SOL * 0.01, // 0.01 SOL
+  // });
+  // transaction.add(transferInstruction);
+
+  // Serialize the transaction for the wallet
+  const serializedTransaction = transaction.serialize({
+    requireAllSignatures: false,
+    verifySignatures: false,
+  });
+
+  return NextResponse.json({
+    transaction: serializedTransaction.toString('base64'),
+    message: "Transaction created successfully", // Customize this message
+  }, { headers: corsHeaders });
+}
+```
+
+> 애플리케이션은 트랜잭션을 네트워크에 제출하지 않으므로 추적 목적으로 트랜잭션 서명에 액세스할 수 없습니다. [소개 강의](/ko/courses/solana-pay/introduction#reference)에 설명된 대로 참조 파라미터를 사용하십시오.
+
+<ArticleSection name="고급 기능" id="advanced-capabilities" level="h2" />
+
+### 게이트 트랜잭션 (Gated Transactions)
+
+트랜잭션 요청은 트랜잭션을 구축하기 전에 조건을 확인하여 정교한 액세스 제어를 가능하게 합니다. 엔드포인트를 제어하므로 NFT 소유권, 화이트리스트 멤버십 또는 기타 기준을 확인할 수 있습니다:
+
+```ts
+// Check NFT ownership before building transaction
+const nfts = await metaplex.nfts().findAllByOwner({ owner: account }).run(); 
+
+const hasRequiredNFT = nfts.some(nft => 
+  nft.collection?.address.toString() === requiredCollection
+);
+
+if (!hasRequiredNFT) {
+  return response.status(403).json({ 
+    error: "Access denied: Required NFT not found" 
+  });
+}
+
+// Build transaction only for verified users
+```
+
+### 보안 강화를 위한 부분 서명
+
+관리자 키 쌍 또는 다자간 인증의 승인이 필요한 트랜잭션의 경우 Solana Pay는 부분 서명을 지원합니다. 서버는 사용자에게 보내기 전에 서명을 추가할 수 있습니다:
+
+```ts
+const transaction = new Transaction({
+  feePayer: account,
+  blockhash,
+  lastValidBlockHeight,
+});
+
+// Add your instructions requiring admin signature
+transaction.add(customInstruction);
+
+// Partially sign with your admin keypair
+transaction.partialSign(adminKeypair);
+
+// Send to user for final signature
+const serializedTransaction = transaction.serialize({
+  requireAllSignatures: false,
+});
+```
+
+<ArticleSection name="예제" id="example" level="h2" />
+
+완전한 예제로 Solana Foundation의 [Solana NFT Minter 예제](https://github.com/solana-developers/solana-pay-nft-minter/tree/main)를 사용할 수 있습니다.

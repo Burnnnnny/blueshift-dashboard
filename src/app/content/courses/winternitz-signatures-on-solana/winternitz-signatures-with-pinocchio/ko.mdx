@@ -1,0 +1,221 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Pinocchio를 사용한 Winternitz 서명 (Winternitz Signatures with Pinocchio)
+
+Blueshift 팀의 [Dean](https://x.com/deanmlittle)은 Winternitz 서명을 생성하고 확인하기 위한 Pinocchio 호환성을 가능하게 하는 첫 번째 크레이트를 출시했습니다.
+
+이 구현은 블록체인 애플리케이션에 양자 저항성 보안을 제공하는 데 특히 유용합니다.
+
+<ArticleSection name="소개" id="introduction" level="h2" />
+
+이 구현은 Solana의 제약 조건인 트랜잭션 크기 제한과 컴퓨팅 단위(Compute Unit) 제한의 균형을 맞추기 위해 `w = 8`을 사용합니다.
+
+Winternitz 매개변수 `w`는 서명 크기와 계산 요구 사항 간에 근본적인 트레이드 오프를 생성합니다:
+- `w` 값이 높을수록 서명은 작아지지만 검증 시 서명 구성 요소당 더 많은 해시 작업이 필요하므로 계산이 더 많이 필요합니다.
+- `w` 값이 낮을수록 서명은 커지지만 검증 시 서명 구성 요소당 더 적은 해시 작업이 필요하므로 계산이 덜 필요합니다.
+
+Solana는 매개변수 선택을 형성하는 두 가지 중요한 제약 조건을 부과합니다:
+- 트랜잭션 크기 제약 조건 (1024바이트): `w = 8`인 경우 전체 구현은 256비트 해시(32바이트 × 32 구성 요소)를 사용하여 정확히 1024바이트 서명을 생성합니다. 이것은 전체 트랜잭션 공간을 소비하여 트랜잭션 오버헤드나 추가 데이터를 위한 공간을 남기지 않습니다.
+- 컴퓨팅 단위 제약 조건: `w = 16`으로 이동하면 서명 크기가 절반으로 줄어들지만 각 서명 구성 요소에 훨씬 더 많은 해시 작업이 필요하므로 검증 중에 Solana의 컴퓨팅 단위(CU) 제한을 초과하게 됩니다.
+
+컴퓨팅 단위 제한은 매개변수 조정을 통해 해결할 수 없으므로 서명 크기 문제는 서명을 896바이트로 자르고 나머지 구성 요소를 머클화(merklizing)하여 해결합니다. 이 접근 방식은 보안을 유지하면서 트랜잭션 오버헤드에 대한 필수적인 여유 공간을 만듭니다.
+
+이것이 구현이 `w = 8`에 정착한 이유입니다. 서명 잘라내기가 크기 제약에 대한 실용적인 솔루션을 제공하면서 컴퓨팅 요구 사항을 관리 가능한 상태로 유지하는 최적의 지점(sweet spot)이기 때문입니다.
+
+### 키 생성
+
+개인 키를 생성하고 SDK를 사용하여 해당 공개 키를 파생합니다:
+
+```rust
+use winternitz::{hash::WinternitzKeccak, privkey::WinternitzPrivkey};
+
+// Generate a new random private key
+let privkey = WinternitzPrivkey::generate();
+
+// Derive the corresponding public key
+let pubkey = privkey.pubkey::<WinternitzKeccak>();
+```
+
+공개 키는 개인 키 구성 요소에 해시 함수를 여러 번 적용하여 보안을 보장하는 단방향 변환을 생성함으로써 파생됩니다.
+
+### 메시지 서명
+
+```rust
+// Sign a message
+let message = b"Hello, World!";
+let signature = privkey.sign::<WinternitzKeccak>(message);
+```
+
+서명 프로세스는 메시지 다이제스트를 기반으로 서명 구성 요소를 생성하며, 각 구성 요소는 해당 메시지 비트에 의해 결정된 특정 횟수의 해시 작업이 필요합니다.
+
+### 서명 검증
+
+```rust
+// Recover public key from signature and message
+let recovered_pubkey = signature.recover_pubkey::<WinternitzKeccak>(message);
+
+// Verify by comparing public keys
+assert_eq!(recovered_pubkey, pubkey);
+```
+
+검증은 서명과 메시지에서 공개 키를 재구성한 다음 예상 공개 키와 비교하여 진위 여부를 확인합니다.
+
+<ArticleSection name="구현" id="implementation" level="h2" />
+
+Pinocchio 프로그램에서 Winternitz 서명 검증을 구현하려면 다음이 필요합니다:
+1. `solana-winternitz` 크레이트: 핵심 Winternitz 서명 기능을 제공합니다.
+2. 양자 보안 주소 파생을 사용하는 PDA 생성 및 검증
+
+`solana-winternitz` 크레이트를 추가하는 것으로 시작하겠습니다.
+
+```
+cargo add solana-winternitz
+```
+
+### 서명 크기 최적화
+
+구현은 Solana의 트랜잭션 제약 조건 내에 맞추기 위해 잘라낸(truncated) 접근 방식을 사용합니다:
+- 전체 서명 (`WinternitzSignature`): 1024바이트 (32바이트 × 32 구성 요소).
+- 잘라낸 서명 (`WinternitzCommitmentSignature`): 896바이트 (32바이트 × 28 구성 요소).
+- 사용 가능한 공간: 트랜잭션 오버헤드를 위해 128바이트 남음
+
+256비트에서 224비트 해시로의 잘라내기는 강력한 보안을 유지하면서 실용적인 사용성을 보장합니다. 나머지 서명 구성 요소는 전체 보안 모델을 보존하기 위해 머클화됩니다.
+
+### 양자 보안 PDA 설정
+
+전통적인 블록체인 서명은 양자 공격에 취약하기 때문에 이 구현은 양자 보안을 위해 PDA(Program Derived Addresses)를 활용합니다.
+
+PDA에는 관련 개인 키가 없으므로 암호화 공격에 면역입니다.
+
+Winternitz 공개 키에서 PDA를 만드는 방법은 다음과 같습니다:
+
+```rust
+pub struct CreateWinternitzPDA {
+    pub hash: [u8; 32],
+    pub bump: [u8; 1],
+}
+
+impl CreateWinternitzPDA {
+    pub fn deserialize(bytes: &[u8]) -> Result<Self, ProgramError> {
+        let data: [u8; 33] = bytes
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        let (hash, bump) = array_refs![&data, 32, 1];
+        Ok(Self {
+            hash: *hash,
+            bump: *bump,
+        })
+    }
+
+    pub fn create_pda(&self, accounts: &CreatePDAAccounts) -> ProgramResult {
+        let seeds = [Seed::from(&self.hash), Seed::from(&self.bump)];
+        let signers = [Signer::from(&seeds)];
+        
+        // Create the quantum-secure PDA
+        CreateAccount {
+            from: accounts.payer,
+            to: accounts.vault,
+            lamports: accounts.lamports,
+            space: 0,
+            owner: &crate::ID,
+        }
+        .invoke_signed(&signers)
+    }
+}
+```
+
+> PDA 파생에 사용되는 해시는 공개 키의 32개 구성 요소 중 28개에서 생성된 머클 루트입니다. 앞서 말했듯이 잘라낸 서명만 맞출 수 있기 때문입니다.
+
+Winternitz 검증의 핵심은 서명과 메시지에서 공개 키를 복구한 다음 예상 PDA와 일치하는지 확인하는 것입니다. 전체 검증 흐름은 다음과 같습니다:
+
+```rust
+pub struct VerifyWinternitzSignature {
+    pub signature: WinternitzSignature,
+    pub bump: [u8; 1],
+}
+
+impl VerifyWinternitzSignature {
+    pub fn deserialize(bytes: &[u8]) -> Result<Self, ProgramError> {
+        if bytes.len() != 897 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+        let (signature_bytes, bump) = bytes.split_at(896);
+        Ok(Self {
+            signature: WinternitzSignature::from(signature_bytes.try_into().unwrap()),
+            bump: [bump[0]],
+        })
+    }
+
+    pub fn verify_and_execute(&self, accounts: &VerifyAccounts, message: &[u8]) -> ProgramResult {
+        // Recover the public key from signature and message
+        let recovered_pubkey = self.signature.recover_pubkey(message);
+        let hash = recovered_pubkey.merklize();
+        
+        // Verify PDA ownership
+        let expected_pda = solana_nostd_sha256::hashv(&[
+            hash.as_ref(),
+            self.bump.as_ref(),
+            crate::ID.as_ref(),
+            b"ProgramDerivedAddress",
+        ]);
+        
+        if expected_pda.ne(accounts.pda.key()) {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+        
+        // Execute the protected operation
+        self.execute_protected_operation(accounts)
+    }
+
+    fn execute_protected_operation(&self, accounts: &VerifyAccounts) -> ProgramResult {
+        // Your quantum-secure operation logic here
+        Ok(())
+    }
+}
+```
+
+`recover_pubkey()` 함수는 서명된 메시지를 각 구성 요소에 필요한 추가 해시 수를 지정하는 다이제스트 값으로 변환하고 올바른 개인 키로만 생성할 수 있는 28개의 공개 키 구성 요소를 생성하여 원래 공개 키를 재구성합니다.
+
+그런 다음 `merklize()` 함수는 28개의 공개 키 구성 요소에서 이진 트리를 구축하여 28개의 모든 구성 요소를 고유하게 나타내는 단일 32바이트 루트를 생성합니다.
+
+<ArticleSection name="보안 고려 사항" id="security-considerations" level="h2" />
+
+조작을 방지하기 위해 항상 서명된 메시지에 중요한 매개변수를 포함하십시오:
+
+```rust
+// Construct message with security parameters
+let message = [
+    accounts.recipient.key().as_ref(),     // Prevent recipient substitution
+    &amount.to_le_bytes(),                 // Prevent amount manipulation
+    &expiry_timestamp.to_le_bytes(),       // Prevent replay attacks
+].concat();
+```
+
+### 만료 확인
+
+Winternitz 서명은 무기한 유효하므로 시간 기반 만료를 구현하십시오:
+
+```rust
+// Verify signature hasn't expired
+let now = Clock::get()?.unix_timestamp;
+let expiry = i64::from_le_bytes(
+    message[40..48].try_into()
+    .map_err(|_| ProgramError::InvalidInstructionData)?
+);
+
+if now > expiry {
+    return Err(ProgramError::InvalidInstructionData);
+}
+```
+
+### 공개 키 확인
+
+권한이 있는 당사자만 서명의 혜택을 받을 수 있도록 합니다:
+
+```rust
+// Verify the recipient is authorized
+let intended_recipient = &message[0..32];
+if accounts.recipient.key().as_ref().ne(intended_recipient) {
+    return Err(ProgramError::InvalidAccountOwner);
+}
+```

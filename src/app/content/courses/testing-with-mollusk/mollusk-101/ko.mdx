@@ -1,0 +1,263 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Mollusk 101
+
+![Testing with Mollusk](/graphics/course-banners/testing-with-mollusk.png)
+
+Solana 프로그램을 효율적으로 테스트하려면 속도, 정밀도 및 통찰력의 균형을 맞춘 프레임워크가 필요합니다. 복잡한 프로그램 로직을 개발할 때 엣지 케이스를 테스트하거나 성능을 정확하게 측정하는 기능을 희생하지 않으면서 빠른 반복을 가능하게 하는 환경이 필요합니다.
+
+이상적인 Solana 테스트 프레임워크는 세 가지 필수 기능을 제공해야 합니다:
+- 빠른 개발 주기를 위한 빠른 실행
+- 포괄적인 엣지 케이스 테스트를 위한 유연한 계정 상태 조작
+- 최적화 통찰력을 위한 상세한 성능 메트릭
+
+Mollusk는 Solana 프로그램 개발을 위해 특별히 설계된 간소화된 테스트 환경을 제공하여 이러한 요구 사항을 해결합니다.
+
+<ArticleSection name="Mollusk란 무엇입니까?" id="what-is-mollusk" level="h2" />
+
+[Mollusk](https://github.com/anza-xyz/mollusk)는 [Anza](https://x.com/anza_xyz) 팀의 [Joe Caulfield](https://x.com/realbuffalojoe)가 만들고 유지 관리하는 Solana 프로그램을 위한 경량 테스트 도구로, 전체 유효성 검사기 런타임의 오버헤드 없이 프로그램 실행에 대한 직접적인 인터페이스를 제공합니다.
+
+Mollusk는 전체 유효성 검사기 환경을 시뮬레이션하는 대신 로우 레벨 Solana 가상 머신(SVM) 구성 요소를 사용하여 프로그램 실행 파이프라인을 구축합니다. 이 접근 방식은 철저한 프로그램 테스트에 필요한 필수 기능을 유지하면서 불필요한 오버헤드를 제거합니다.
+
+이 프레임워크는 Agave 유효성 검사기 구현에서 `AccountsDB` 및 `Bank`와 같은 무거운 구성 요소를 제외하여 탁월한 성능을 달성합니다. 이 설계 선택은 명시적 계정 프로비저닝을 필요로 하지만, 계정 상태에 대한 정밀한 제어를 부여하고 전체 유효성 검사기 환경에서 재현하기 어려운 시나리오를 테스트할 수 있게 하므로 실제로는 이점이 됩니다.
+
+Mollusk의 테스트 도구는 컴퓨팅 예산 조정, 기능 세트 수정 및 sysvar 사용자 지정을 포함한 포괄적인 구성 옵션을 지원합니다. 이러한 구성은 `Mollusk` 구조체를 통해 직접 관리되며 내장 헬퍼 함수를 사용하여 수정할 수 있습니다.
+
+<ArticleSection name="첫 단계" id="first-steps" level="h2" />
+
+핵심 `mollusk-svm` crate는 기본적인 테스트 인프라를 제공하는 반면, 추가 crate는 `Token` 및 `Memo` 프로그램과 같은 일반적인 Solana 프로그램을 위한 전문 헬퍼를 제공합니다.
+
+### 설정 (Setup)
+
+프로젝트에 메인 Mollusk crate를 추가하십시오:
+
+```
+cargo add mollusk-svm --dev
+```
+
+필요한 경우 프로그램별 헬퍼를 포함하십시오:
+
+```
+cargo add mollusk-svm-programs-memo mollusk-svm-programs-token --dev
+```
+
+이러한 추가 crate는 표준 Solana 프로그램을 위한 미리 구성된 헬퍼를 제공합니다. 이를 통해 상용구 코드를 줄이고 토큰 작업이나 메모 명령어가 포함된 일반적인 테스트 시나리오의 설정을 단순화합니다.
+
+> `cargo add <crate-name> --dev`의 `--dev` 플래그는 `Cargo.toml`의 `[dev-dependencies]` 섹션 아래에 추가하여 프로그램 바이너리를 가볍게 유지하는 데 사용됩니다.
+> 이 구성을 사용하면 테스트 유틸리티가 프로그램의 배포 크기를 늘리지 않으면서 개발 중에 필요한 모든 Solana 유형 및 헬퍼 함수에 액세스할 수 있습니다.
+
+### 추가 종속성
+
+몇 가지 Solana crate는 필수 유형 및 유틸리티를 제공하여 테스트 경험을 향상시킵니다:
+
+```
+cargo add solana-precompiles solana-account solana-pubkey solana-feature-set solana-program solana-sdk --dev
+```
+
+<ArticleSection name="Mollusk 기초" id="mollusk-basics" level="h2" />
+
+테스트 중에 "ProgramMismatch" 오류가 발생하지 않고 올바르게 호출되도록 `program_id`를 선언하고 프로그램에서 사용한 주소로 `Mollusk` 인스턴스를 생성하는 것으로 시작하십시오. 또한 다음과 같이 빌드된 프로그램의 경로를 지정하십시오:
+
+```rust
+use mollusk_svm::Mollusk;
+use solana_sdk::pubkey::Pubkey;
+
+const ID: Pubkey = solana_sdk::pubkey!("22222222222222222222222222222222222222222222");
+
+// Alternative using an Array of bytes
+// pub const ID: [u8; 32] = [
+//    0x0f, 0x1e, 0x6b, 0x14, 0x21, 0xc0, 0x4a, 0x07,
+//    0x04, 0x31, 0x26, 0x5c, 0x19, 0xc5, 0xbb, 0xee,
+//    0x19, 0x92, 0xba, 0xe8, 0xaf, 0xd1, 0xcd, 0x07,
+//    0x8e, 0xf8, 0xaf, 0x70, 0x47, 0xdc, 0x11, 0xf7,
+// ];
+
+#[test]
+fn test() {
+    // Omit the `.so` file extension for the program name since
+    // it is automatically added when Mollusk is loading the file.
+    let mollusk = Mollusk::new(&ID, "target/deploy/program");
+
+    // Alternative using an Array of bytes
+    // let mollusk = Mollusk::new(&Pubkey::new_from_array(ID), "target/deploy/program")
+}
+```
+
+테스트를 위해 다음 네 가지 주요 API 메서드 중 하나를 사용할 수 있습니다:
+
+- `process_instruction`: 명령어를 처리하고 결과를 반환합니다.
+- `process_and_validate_instruction`: 명령어를 처리하고 결과에 대해 일련의 검사를 수행하며, 검사가 실패하면 패닉이 발생합니다.
+- `process_instruction_chain`: 명령어 체인을 처리하고 결과를 반환합니다.
+- `process_and_validate_instruction_chain`: 명령어 체인을 처리하고 각 결과에 대해 일련의 검사를 수행하며, 검사가 실패하면 패닉이 발생합니다.
+
+하지만 이 메서드를 사용하기 전에 계정과 명령어 구조체를 생성하여 전달해야 합니다:
+
+### 계정 (Accounts)
+
+Mollusk로 Solana 프로그램을 테스트할 때 실제 프로그램 실행 시나리오를 반영하는 여러 유형의 계정으로 작업하게 됩니다. 이러한 계정을 올바르게 구성하는 방법을 이해하는 것은 효과적인 테스트에 필수적입니다.
+
+가장 기본적인 계정 유형은 `SystemAccount`이며 두 가지 주요 변형이 있습니다:
+- Payer: 프로그램 계정 생성 또는 lamport 전송에 자금을 지원하는 lamport가 있는 계정
+- Default Account: 명령 내에서 초기화를 기다리는 프로그램 계정을 나타내는 데 일반적으로 사용되는 비어 있고 lamport가 없는 계정
+
+시스템 계정에는 데이터가 없으며 시스템 프로그램이 소유합니다. 지불자와 초기화되지 않은 계정의 주요 차이점은 lamport 잔액입니다. 지불자는 자금이 있는 반면 초기화되지 않은 계정은 비어 있습니다.
+
+Mollusk에서 이러한 기본 계정을 만드는 방법은 다음과 같습니다:
+
+```rust
+use solana_sdk::{
+    account::Account,
+    system_program
+};
+
+// Payer account with lamports for transactions
+let payer = Pubkey::new_unique();
+let payer_account = Account::new(100_000_000, 0, &system_program::id());
+
+// Uninitialized account with no lamports
+let default_account = Account::default();
+```
+
+데이터를 포함하는 `ProgramAccounts`의 경우 두 가지 구성 접근 방식이 있습니다:
+
+```rust
+use solana_sdk::account::Account;
+
+let data = vec![
+    // Your serialized account data
+];
+let lamports = mollusk
+    .sysvars
+    .rent
+    .minimum_balance(data.len());
+
+let program_account = Pubkey::new_unique();
+let program_account_account = Account {
+    lamports,
+    data,
+    owner: ID, // The program's that owns the account
+    executable: false,
+    rent_epoch: 0,
+};
+```
+
+계정을 만든 후에는 Mollusk가 기대하는 형식으로 컴파일하십시오:
+
+```rust
+let accounts = [
+    (user, user_account),
+    (program_account, program_account_account)
+];
+```
+
+### 명령어 (Instructions)
+
+Mollusk 테스트를 위한 명령어를 생성하는 것은 프로그램을 식별하는 `program_id`, 구별자 및 매개변수를 포함하는 `instruction_data`, 관련된 계정 및 권한을 지정하는 계정 메타데이터의 세 가지 필수 구성 요소를 이해하면 간단합니다.
+
+기본 명령어 구조는 다음과 같습니다:
+
+```rust
+use solana_sdk::instruction::{Instruction, AccountMeta};
+
+let instruction = Instruction::new_with_bytes(
+    ID, // Your program's ID
+    &[0], // Instruction data (discriminator + parameters)
+    vec![AccountMeta::new(payer, true)], // Account metadata
+);
+```
+
+명령어 데이터는 명령어 구별자와 명령어에 필요한 모든 매개변수를 포함해야 합니다. Anchor 프로그램의 경우 기본 구별자는 명령어 이름에서 파생된 8바이트 값입니다.
+
+Anchor 구별자 생성을 단순화하려면 이 헬퍼 함수를 사용하고 구별자를 직렬화된 매개변수와 연결하여 명령어 데이터를 구성하십시오:
+
+```rust
+use sha2::{Sha256, Digest};
+
+let instruction_data = &[
+    &get_anchor_discriminator_from_name("deposit"),
+    &1_000_000u64.to_le_bytes()[..],
+]
+.concat();
+
+pub fn get_anchor_discriminator_from_name(name: &str) -> [u8; 8] {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("global:{}", name));
+    let result = hasher.finalize();
+
+    [
+        result[0], result[1], result[2], result[3],
+        result[4], result[5], result[6], result[7],
+    ]
+}
+```
+
+`AccountMeta` 구조체의 경우 계정 권한에 따라 적절한 생성자를 사용해야 합니다:
+
+- `AccountMeta::new(pubkey, is_signer)`: 변경 가능한 계정의 경우
+- `AccountMeta::new_readonly(pubkey, is_signer)`: 읽기 전용 계정의 경우
+
+부울 매개변수는 계정이 트랜잭션에 서명해야 하는지 여부를 나타냅니다. 대부분의 계정은 작업을 승인해야 하는 지불자와 권한을 제외하고는 비서명자(false)입니다.
+
+### 실행 (Execution)
+
+계정과 명령어가 준비되면 이제 Mollusk의 실행 API를 사용하여 프로그램 로직을 실행하고 검증할 수 있습니다. Mollusk는 검증 검사가 필요한지 여부와 단일 또는 다중 명령어를 테스트하는지 여부에 따라 4가지 다른 실행 방법을 제공합니다.
+
+가장 간단한 실행 방법은 검증 없이 단일 명령어를 처리합니다:
+
+```rust
+mollusk.process_instruction(&instruction, &accounts);
+```
+이것은 수동으로 검사할 수 있는 실행 결과를 반환하지만 자동 검증은 수행하지 않습니다.
+
+포괄적인 테스트를 위해 예상 결과를 지정할 수 있는 검증 방법을 사용하십시오:
+
+```rust
+mollusk.process_and_validate_instruction(
+    &instruction,
+    &accounts,
+    &[
+        Check::success(), // Verify the transaction succeeded
+        Check::compute_units(5_000), // Expect specific compute usage
+        Check::account(&payer).data(&expected_data).build(), // Validate account data
+        Check::account(&payer).owner(&ID).build(), // Validate account owner
+        Check::account(&payer).lamports(expected_lamports).build(), // Check lamport balance
+    ],
+);
+```
+
+> 다음과 같이 "묶어서" 동일한 계정에서 여러 검사를 수행할 수 있습니다: `Check::account(&payer).data(&expected_data).owner(&ID).build()`
+
+검증 시스템은 실행 결과의 다양한 측면을 확인하기 위해 다양한 검사 유형을 지원합니다. 엣지 케이스 테스트의 경우 명령어가 예상대로 실패하는지 확인할 수 있습니다:
+
+```rust
+mollusk.process_and_validate_instruction(
+    &instruction,
+    &accounts,
+    &[
+        Check::err(ProgramError::MissingRequiredSignature), // Expect specific error
+    ],
+);
+```
+
+여러 명령어가 필요한 복잡한 워크플로 테스트의 경우 명령어 체인 메서드를 사용하십시오:
+
+```rust
+mollusk.process_instruction_chain(
+    &[
+        (&instruction, &accounts),
+        (&instruction_2, &accounts_2)
+    ]
+);
+```
+
+여러 명령어를 포괄적인 검증과 결합하십시오:
+
+```rust
+mollusk.process_and_validate_instruction_chain(&[
+    (&instruction, &accounts, &[Check::success()]),
+    (&instruction_2, &accounts_2, &[
+        Check::success(),
+        Check::account(&target_account).lamports(final_balance).build(),
+    ]),
+]);
+```

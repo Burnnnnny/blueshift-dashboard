@@ -1,0 +1,115 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 소유자 확인 (Owner Checks)
+
+소유자 확인은 Solana 프로그램 보안의 첫 번째 방어선입니다. 명령어 핸들러에 전달된 계정이 실제로 예상 프로그램에 의해 소유되는지 확인하여 공격자가 악성 유사 계정으로 대체하는 것을 방지합니다.
+
+Solana의 `AccountInfo` 구조체에 있는 모든 계정에는 해당 계정을 제어하는 프로그램을 식별하는 owner 필드가 포함되어 있습니다. 소유자 확인은 프로그램이 계정 데이터를 신뢰하기 전에 이 `owner` 필드가 예상 `program_id`와 일치하는지 확인합니다.
+
+`AccountInfo` 구조체에는 계정을 소유한 프로그램을 나타내는 소유자를 포함하여 여러 필드가 있습니다. 소유자 확인은 `AccountInfo`의 이 `owner` 필드가 예상 `program_id`와 일치하는지 확인합니다.
+
+소유자 확인이 없으면 공격자는 올바른 구별자와 모든 올바른 필드를 갖춘 계정 데이터 구조의 완벽한 "복제본"을 생성하여 데이터 검증에 의존하는 명령어를 조작하는 데 사용할 수 있습니다. 마치 누군가가 실제 신분증과 동일해 보이지만 잘못된 권한에 의해 제어되는 가짜 신분증을 만드는 것과 같습니다.
+
+> 중요한 예외는 계정의 내부 데이터를 수정할 때입니다. 이러한 경우 Solana의 런타임은 다른 프로그램이 소유하지 않은 계정에 쓰는 것을 자동으로 방지합니다. 그러나 읽기 작업 및 검증 로직의 경우 스스로 해결해야 합니다.
+
+<ArticleSection name="Anchor" id="anchor" level="h2" />
+
+`program_account`의 `owner`를 기반으로 로직을 실행하는 이 취약한 명령어를 고려하십시오:
+
+```rust
+#[program]
+pub mod insecure_check{
+    use super::*;
+    //..
+
+    pub fn instruction(ctx: Context<Instruction>) -> Result<()> {
+        let account_data = ctx.accounts.program_account.try_borrow_data()?;
+        let mut account_data_slice: &[u8] = &account_data;
+        let account_state = ProgramAccount::try_deserialize(&mut account_data_slice)?;
+
+        if account_state.owner != ctx.accounts.owner.key() {
+            return Err(ProgramError::InvalidArgument.into());
+        }
+
+        //..do something
+
+        Ok(())
+    }
+
+    //..
+}
+
+#[derive(Accounts)]
+pub struct Instruction<'info> {
+    pub owner: Signer<'info>,
+   #[account(mut)]
+    /// CHECK: This account will not be checked by Anchor
+    pub program_account: UncheckedAccount<'info>,
+
+}
+
+#[account]
+pub struct ProgramAccount {
+    owner: Pubkey,
+}
+```
+
+`UncheckedAccount` 유형은 Anchor가 "아무것도 확인하지 않으므로 각별히 주의해서 처리하십시오"라고 말하는 방식입니다. 계정 데이터가 완벽하게 역직렬화되고 합법적으로 보일 수 있지만 누락된 소유자 확인은 치명적인 취약점을 만듭니다.
+
+공격자는 동일한 데이터 구조로 자신의 계정을 만들어 명령어에 전달할 수 있습니다. 프로그램은 소유권 필드를 기꺼이 확인하지만 공격자가 계정을 제어하므로 명령어 내부에서 원하는 모든 작업을 수행할 수 있습니다.
+
+수정 사항은 간단하지만 필수적입니다. 항상 계정 내용을 신뢰하기 전에 프로그램이 소유하고 있는지 확인하십시오.
+
+`Anchor`를 사용하면 다음과 같이 `UncheckedAccount`를 `ProgramAccount`로 변경하여 계정 구조체에서 직접 이 검사를 수행할 수 있으므로 매우 쉽습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct Instruction<'info> {
+    pub owner: Signer<'info>,
+   #[account(mut)]
+    /// CHECK: This account will not be checked by Anchor
+    pub program_account: Account<'info, ProgramAccount>,
+
+}
+```
+
+또는 다음과 같이 `owner` 계정 제약 조건을 추가할 수 있습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct Instruction<'info> {
+    pub owner: Signer<'info>,
+   #[account(mut, owner = ID)]
+    /// CHECK: This account will not be checked by Anchor
+    pub program_account: UncheckedAccount<'info>,
+
+}
+```
+
+또는 다음과 같이 `ctx.accounts.program_account.owner` 확인을 사용하여 명령어에 소유자 확인을 추가할 수 있습니다:
+
+```rust
+pub fn update_ownership(ctx: Context<UpdateOwnership>) -> Result<()> {
+    if ctx.accounts.program_account.owner != ID {
+        return Err(ProgramError::IncorrectProgramId.into());
+    }
+    
+    //..do something
+
+    Ok(())
+}
+```
+
+이 검사를 추가하면 명령어 핸들러는 계정에 올바른 `program_id`가 있는 경우에만 진행됩니다. 계정이 우리 프로그램에 의해 소유되지 않은 경우 트랜잭션이 실패합니다.
+
+<ArticleSection name="Pinocchio" id="pinocchio" level="h2" />
+
+Pinocchio에서는 계정 구조체 내부에 보안 검사를 직접 추가할 수 없으므로 명령어 로직에서 수행해야 합니다.
+
+다음과 같이 `is_owned_by()` 함수를 사용하여 앵커와 매우 유사하게 수행할 수 있습니다:
+
+```rust
+if !self.accounts.owner.is_owned_by(ID) {
+    return Err(ProgramError::IncorrectProgramId.into());
+}
+```

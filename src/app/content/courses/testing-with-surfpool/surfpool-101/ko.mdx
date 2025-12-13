@@ -1,0 +1,60 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# Surfpool 101
+
+![Testing with Surfpool](/graphics/course-banners/testing-with-surfpool.png)
+
+CPI(Cross-Program Invocations)에 의존하는 Solana 프로그램을 테스트하려면 전통적으로 개발자는 메인넷에서 계정과 프로그램을 덤프한 다음 로컬 유효성 검사기에 업로드해야 했습니다.
+
+이 프로세스는 몇 개의 계정에서는 작동하지만 40개 이상의 계정과 8개 이상의 프로그램에 의존할 수 있는 Jupiter와 같은 복잡한 프로그램에 대한 CPI를 테스트할 때는 완전히 불가능해집니다.
+
+Surfpool은 메인넷 계정을 온디맨드로 가져와 로컬에서 프로그램을 시뮬레이션할 수 있게 하여 이 문제를 해결하며 다음과 같은 추가 기능을 제공합니다:
+- **시스템 변수 사용자 지정**: 시간 여행(과거 슬롯 또는 타임스탬프에서 프로그램 테스트), 시계 일시 중지 또는 블록 생성 중지
+- **계정 데이터 수정**: SOL 공급량 설정(총 발행량, 유통량 및 비유통량), 프로그램 간 계정 데이터 전송 또는 계정 핵심 데이터 및 토큰 계정 정보 업데이트
+- **체인 데이터 분석**: 컴퓨팅 단위, 계정 변경 및 실행 세부 정보에 대한 트랜잭션을 프로파일링한 다음 서명, UUID 또는 태그별로 상세 프로필 검색
+
+<ArticleSection name="Surfpool이란 무엇입니까?" id="what-is-surfpool" level="h2" />
+
+[Surfpool](https://docs.surfpool.run/)은 포괄적인 SDK 및 도구 모음이며, **Surfnet**은 생성되는 로컬 Solana 네트워크입니다. Surfpool은 개발 환경으로, Surfnet은 그 내부에서 실행되는 블록체인 네트워크로 생각하면 됩니다.
+
+Surfnet은 Solana 빌더에게 최고의 개발 경험을 제공하기 위해 특별히 제작된 solana-test-validator의 드롭인 대체품 역할을 합니다.
+
+[TxTx](https://x.com/txtx_sol) 팀이 개발한 Surfpool은 코드로써의 인프라(Infrastructure as Code)를 Anchor 기반 프로젝트에 원활하게 통합하여 프라이빗 또는 퍼블릭 등 모든 Solana 네트워크에 재현 가능하고 감사 가능하며 안전한 배포를 가능하게 합니다.
+
+<ArticleSection name="첫 단계" id="first-steps" level="h2" />
+
+Surfnet을 실행하는 데 필요한 모든 것이 Surfpool SDK에 포함되어 있습니다. 설치는 운영 체제에 따라 다르므로 특정 설정에 대한 공식 [설치 페이지](https://docs.surfpool.run/install)를 따르십시오.
+
+Surfpool SDK를 설치한 후 다음을 사용하여 Surfnet을 시작하십시오:
+
+```bash
+surfpool start
+```
+
+그러면 표준 로컬 유효성 검사기 포트(`http://127.0.0.1:8899`)에서 Surfnet이 시작되고 터미널 UI에 다음이 표시됩니다:
+- **슬롯 및 에포크**: 현재 실행 중인 슬롯은 400ms마다 자동으로 처리됩니다. **Tab**을 사용하여 다음 슬롯으로 수동으로 이동하거나 **Spacebar**를 사용하여 자동 블록 생성을 일시 중지/재개합니다.
+- **트랜잭션 로그**: 트랜잭션이 수행하는 모든 작업을 보여주는 타임스탬프가 있는 활동 스트림
+
+브라우저 기반 경험을 원하시면 [이 링크](http://127.0.0.1:8899)에서 Surfpool Studio에 연결하십시오.
+
+> Surfpool Studio에는 모든 터미널 UI 기능과 시간 여행, 모든 민트에 대한 모든 계정에 토큰 추가와 같은 추가 기능이 포함되어 있습니다.
+
+### 프로그램 배포
+
+Surfnet을 설정한 후 프로그램을 배포하고 구축을 시작하십시오.
+
+**Anchor 프로그램**: `[programs.localnet]`에 대해 구성된 `Anchor.toml`과 함께 `anchor deploy`를 사용하십시오.
+
+**Pinocchio 프로그램**: 로컬넷으로 설정된 구성으로 Solana CLI를 통해 배포하십시오: `solana program deploy ./target/deploy/your_program.so --program-id ./target/deploy/your_program-keypair.json`
+
+> Anchor 작업 공간에서 `surfpool start`를 실행하면 Surfnet에서 프로그램의 원활한 자동 배포를 위해 IaC(Infrastructure as Code)를 사용하라는 메시지가 표시됩니다.
+
+### 프로그램 테스트
+
+로컬넷에 배포한 후 로컬 유효성 검사기를 대상으로 하여 Surfnet에 연결하십시오:
+
+```ts
+import { Connection } from "@solana/web3.js";
+
+const connection = new Connection("http://localhost:8899", "confirmed");
+```

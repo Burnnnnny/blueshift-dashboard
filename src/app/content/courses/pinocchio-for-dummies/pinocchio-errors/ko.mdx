@@ -1,0 +1,86 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 오류 (Errors)
+
+명확하고 설명적인 오류 유형은 Pinocchio로 구축된 Solana 프로그램에서 필수적입니다. 이를 통해 디버깅이 쉬워지고 프로그램과 상호 작용하는 사용자 및 클라이언트에게 의미 있는 피드백을 제공할 수 있습니다.
+
+### The PinocchioError Enum
+
+Rust에서 사용자 정의 오류 유형을 정의할 때 `thiserror`, `anyhow` 및 `failure`와 같은 여러 옵션이 있습니다. Pinocchio 프로그램의 경우 `thiserror`가 선호되는 선택입니다. 이유는 다음과 같습니다:
+- `#[error("...")]` 속성을 사용하여 각 오류 변형에 사람이 읽을 수 있는 메시지를 주석으로 달 수 있습니다.
+- `core::error::Error` 및 `Display` 특성을 자동으로 구현하여 오류를 쉽게 인쇄하고 디버깅할 수 있습니다.
+- 모든 오류 메시지 및 형식은 컴파일 타임에 확인되므로 런타임 문제의 위험이 줄어듭니다.
+- 가장 중요한 것은 Pinocchio 프로그램에 필요한 기본 기능을 비활성화할 때 `no_std` 환경을 지원한다는 것입니다.
+
+Pinocchio 프로그램에서 thiserror를 사용하려면 `Cargo.toml`에 다음과 같이 추가하십시오:
+
+```
+[dependencies]
+thiserror = { version = "2.0", default-features = false }
+```
+
+Pinocchio 프로그램에 대한 사용자 정의 오류 유형을 정의하는 방법은 다음과 같습니다:
+
+```rust
+use {
+    num_derive::FromPrimitive,
+    pinocchio::program_error::{ProgramError, ToStr},
+    thiserror::Error,
+};
+
+#[derive(Clone, Debug, Eq, Error, FromPrimitive, PartialEq)]
+pub enum PinocchioError {
+    // 0
+    /// Lamport 잔고가 임대료 면제 임계값 미만입니다.
+    #[error("Lamport balance below rent-exempt threshold")]
+    NotRentExempt,
+}
+```
+
+각 변형에는 오류 발생 시 표시될 메시지로 주석이 달려 있습니다.
+
+Solana 명령어에서 사용자 정의 오류를 반환하려면 `ProgramError`에 대해 `From<PinocchioError>`를 구현하십시오:
+
+```rust
+impl From<PinocchioError> for ProgramError {
+    fn from(e: PinocchioError) -> Self {
+        ProgramError::Custom(e as u32)
+    }
+}
+```
+
+이렇게 하면 `?` 연산자를 사용하여 사용자 정의 오류를 원활하게 반환할 수 있습니다.
+
+### 원시 값에서 오류 역직렬화 (Deserialize Errors from Raw Values)
+
+원시 오류 코드(예: 로그 또는 프로그램 간 호출에서 발생한 코드)를 오류 열거형으로 다시 변환해야 하는 경우 `TryFrom<u32>`를 구현하십시오:
+
+```rust
+impl TryFrom<u32> for PinocchioError {
+    type Error = ProgramError;
+    fn try_from(error: u32) -> Result<Self, Self::Error> {
+        match error {
+            0 => Ok(PinocchioError::NotRentExempt),
+            _ => Err(ProgramError::InvalidArgument),
+        }
+    }
+}
+```
+
+> 이것은 선택 사항이지만 고급 오류 처리 및 테스트에 유용합니다.
+
+### 사람이 읽을 수 있는 오류 (Human Readable Errors)
+
+로깅 및 디버깅을 위해 오류의 문자열 표현을 제공할 수 있습니다. `ToStr` 특성을 구현하면 이를 수행할 수 있습니다:
+
+```rust
+impl ToStr for PinocchioError {
+    fn to_str<E>(&self) -> &'static str {
+        match self {
+            PinocchioError::NotRentExempt => "Error: Lamport balance below rent-exempt threshold",
+        }
+    }
+}
+```
+
+> 이 단계도 선택 사항이지만 오류 보고를 더 사용자 친화적으로 만들 수 있습니다.

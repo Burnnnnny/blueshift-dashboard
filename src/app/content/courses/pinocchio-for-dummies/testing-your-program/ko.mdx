@@ -1,0 +1,32 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 프로그램 테스트 (Testing your Program)
+
+잠재적인 버그와 취약점을 식별하기 위해 메인넷 배포 전에 철저한 테스트가 필수적입니다.
+
+잘 테스트된 프로그램은 금전적 손실을 방지하고 사용자 신뢰를 구축하며 다양한 조건에서 애플리케이션이 올바르게 작동하도록 보장합니다.
+
+<ArticleSection name="Mollusk 테스트" id="mollusk-tests" level="h2" />
+
+복잡한 프로그램 상태를 설정하거나 복잡한 온체인 상호 작용이 필요한 경우 Mollusk는 테스트 환경에 대해 더 세분화된 제어를 제공합니다.
+
+Mollusk는 Solana 프로그램을 위해 특별히 설계된 Rust 테스트 프레임워크로 다음을 수행할 수 있습니다:
+- 네트워크 오버헤드 없이 격리된 상태에서 프로그램 로직 테스트
+- 복잡한 계정 상태 및 프로그램 조건 쉽게 설정
+- 전체 통합 테스트보다 빠르게 테스트 실행
+- 특정 블록체인 조건 및 엣지 케이스 모의
+
+Mollusk 테스트는 [여기](/ko/courses/testing-with-mollusk)에서 철저히 다뤘습니다.
+
+pinocchio 프로그램을 테스트하려면 `lib.rs`의 `test` 구성 플래그와 함께 `test.rs` 파일을 가져오면 됩니다:
+
+```rust
+#[cfg(test)]
+pub mod tests;
+```
+
+다음을 사용하여 테스트를 실행하십시오:
+
+```
+cargo test-sbf
+```

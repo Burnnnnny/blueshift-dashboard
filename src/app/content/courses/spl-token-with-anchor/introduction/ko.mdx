@@ -1,0 +1,89 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 토큰 프로그램 (The Token Program)
+
+![SPL Token with Anchor](/graphics/course-banners/spl-token-with-anchor.png)
+
+Solana에서 토큰과 관련된 모든 것은 [SPL 토큰 프로그램](https://github.com/solana-program/token)과 [Token2022 프로그램](/ko/courses/token-2022-program)에 의해 처리됩니다. 이는 모든 토큰이 어떻게 생성, 관리, 전송되는지를 정의하는 Solana의 네이티브 토큰 프레임워크입니다.
+
+이것은 네트워크 전반의 모든 토큰 작업을 처리하는 단일하고 통합된 프로그램으로, 일관성과 상호 운용성을 보장합니다.
+
+> Solana의 모든 토큰에 대해 단일하고 통합된 인터페이스를 갖는다는 결정은 모든 dApp(탈중앙화 애플리케이션)과 통합(지갑 등)에서 복제될 수 있는 쉬운 구현을 생성합니다.
+
+Anchor의 경우, 토큰과 관련된 모든 것은 `anchor-spl` 크레이트에서 찾을 수 있습니다. 이러한 이유로 `Anchor` 워크스페이스를 초기화한 후에는 다음과 같이 하면 됩니다:
+
+```bash
+cargo add anchor-spl
+```
+
+> Anchor에 익숙하지 않다면, 계속 진행하기 전에 [입문자를 위한 Anchor](/ko/courses/anchor-for-dummies)를 살펴보는 것을 권장합니다.
+
+<ArticleSection name="Mint와 Token 계정" id="mint-and-token-accounts" level="h2" />
+
+`Anchor`에 익숙하다면, 계정 초기화와 관련된 많은 복잡성을 추상화하는 데 도움이 되는 매크로 세트가 있다는 것을 알 것입니다.
+
+`Mint`, `Token`, `Associated Token` 계정에 대해서도 동일하게 작동합니다.
+
+### Mint 계정
+
+`Anchor`가 제공하는 매크로 덕분에, `Mint` 계정을 쉽게 생성하는 방법은 다음과 같습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct CreateMint<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(
+        init,
+        payer = signer,
+        mint::decimals = 6,
+        mint::authority = signer.key(),
+    )]
+    pub mint: Account<'info, Mint>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+```
+
+### Token 계정
+
+`Token` 계정도 마찬가지입니다. 매크로를 통해 `Token` 계정을 생성하는 것은 다음과 같습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct CreateToken<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        token::mint = mint,
+        token::authority = signer,
+    )]
+    pub token: Account<'info, TokenAccount>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+}
+```
+
+### 연관 토큰 계정 (Associated Token Account)
+
+`연관 토큰` 계정도 마찬가지로, 매크로를 통해 `연관 토큰` 계정을 생성하는 것은 `Token` 계정을 생성하는 것과 비슷해 보일 것입니다. 유일한 차이점은 제약 조건(constraint)이며 다음과 같습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct CreateToken<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    pub mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = signer,
+    )]
+    pub token: Account<'info, TokenAccount>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+}
+```

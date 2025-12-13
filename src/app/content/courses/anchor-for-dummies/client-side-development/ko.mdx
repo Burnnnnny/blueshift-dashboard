@@ -1,0 +1,307 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 클라이언트 사이드 개발 (Client Side Development)
+
+대부분의 dApp은 배포된 Solana 프로그램과 상호 작용하기 위해 TypeScript를 사용합니다. 클라이언트 사이드에서 프로그램을 통합하는 방법을 이해하는 것은 기능적인 애플리케이션을 구축하는 데 필수적입니다.
+
+<ArticleSection name="Anchor 클라이언트 SDK" id="anchor-client-sdk" level="h2" />
+
+Anchor는 프로그램의 구조를 반영하는 인터페이스 설명 언어(IDL) 파일을 통해 Solana 프로그램과의 클라이언트 상호 작용을 단순화합니다.
+
+Anchor의 TypeScript 라이브러리(@coral-xyz/anchor)와 결합하면, IDL은 명령어와 트랜잭션을 구축하는 간소화된 접근 방식을 제공합니다.
+
+### 설정 (Setup)
+
+`@coral-xyz/anchor` 패키지는 Anchor 프로그램을 생성할 때 자동으로 설치됩니다. `anchor build`를 실행한 후, Anchor는 다음을 생성합니다:
+- `target/idl/<program-name>.json`에 위치한 IDL
+- `target/types/<program-name>.ts`에 위치한 TypeScript SDK
+
+이 파일들은 기저의 복잡성을 대부분 추상화합니다. 다음 구조를 사용하여 TypeScript 클라이언트로 전송하세요:
+
+```
+src
+├── anchor
+│     ├── <program-name>.json
+│     └── <program-name>.ts
+└── integration.ts
+```
+
+> `integration.ts` 파일은 프로그램 상호 작용 로직을 포함합니다. `<program-name>.json` 파일은 IDL이고, `<program-name>.ts`는 생성된 TypeScript 타입을 포함합니다.
+
+Anchor의 TypeScript SDK와 함께 지갑 어댑터를 사용하려면, 연결(Connection - localhost, devnet, 또는 mainnet)과 지갑(Wallet - 트랜잭션 비용을 지불하고 서명하는 주소)을 결합하는 Provider 객체를 생성하세요.
+
+지갑과 연결 설정:
+
+```ts
+import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
+
+const { connection } = useConnection();
+const wallet = useAnchorWallet();
+```
+
+> `@solana/wallet-adapter-react`의 `useWallet` 훅은 Anchor의 Provider가 예상하는 Wallet 객체와 호환되지 않습니다. 이것이 우리가 `useAnchorWallet` 훅을 사용하는 이유입니다.
+
+Provider 객체를 생성하고 기본값으로 설정하세요:
+
+```
+import { AnchorProvider, setProvider } from "@coral-xyz/anchor";
+
+const provider = new AnchorProvider(connection, wallet, {
+  commitment: "confirmed",
+});
+
+setProvider(provider);
+```
+
+### 프로그램 (Program)
+
+Anchor의 Program 객체는 Solana 프로그램과 상호 작용하기 위한 커스텀 API를 생성합니다. 이 API는 모든 온체인 프로그램 통신을 위한 중앙 인터페이스 역할을 합니다:
+- 트랜잭션 전송
+- 역직렬화된 계정 가져오기
+- 명령어 데이터 디코딩
+- 계정 변경 구독
+- 이벤트 수신
+
+타입과 IDL을 가져와서 Program 객체를 생성하세요:
+
+```ts
+import <program-name> from "./<program-name>.json";
+import type { <Program-Type> } from "./<program-name>.ts";
+import { Program, Idl } from "@coral-xyz/anchor";
+
+const program = new Program(<program-name> as <Program-Type>);
+```
+
+기본 공급자를 설정하지 않았다면 명시적으로 지정하세요:
+
+```ts
+const program = new Program(<program-name> as <Program-Type>, provider);
+```
+
+구성이 완료되면 Anchor Methods Builder를 사용하여 명령어와 트랜잭션을 구성하세요. `MethodsBuilder`는 IDL을 사용하여 프로그램 명령어를 호출하는 트랜잭션을 구축하는 간소화된 형식을 제공합니다.
+
+기본적인 `MethodsBuilder` 패턴:
+
+```ts
+await program.methods
+  .instructionName(instructionDataInputs)
+  .accounts({})
+  .signers([])
+  .rpc();
+```
+
+> API는 Rust의 snake_case 관례 대신 camelCase 명명법을 사용합니다. 명령어 이름으로 호출하며, 인수는 쉼표로 구분된 값으로 전달합니다.
+
+Provider 외의 추가 서명자는 `.signers()`를 사용하여 전달하세요.
+
+### 계정 (Accounts)
+
+`MethodsBuilder`에서 `.accounts`를 호출하여 IDL에 기반해 명령어가 예상하는 각 계정이 담긴 객체를 전달하세요.
+
+> Anchor 0.30.0부터 PDA나 명시적 주소처럼 자동으로 해결될 수 있는 계정은 IDL에 포함되어 `.accounts` 호출에서 요구되지 않습니다 (`.accountPartial()`이 기본값). 모든 계정을 수동으로 전달하려면 `.accountsStrict()`를 사용하세요.
+
+### 트랜잭션 (Transactions)
+
+Anchor를 통해 트랜잭션을 전송하는 기본 메서드는 `.rpc()`이며, 이는 트랜잭션을 블록체인으로 직접 전송합니다.
+
+백엔드 서명(사용자의 지갑으로 프론트엔드에서 트랜잭션을 생성한 후 백엔드 키페어로 안전하게 서명하는 등)이 필요한 시나리오의 경우 `.transaction()`을 사용하세요:
+
+```ts
+const transaction = await program.methods
+  .instructionName(instructionDataInputs)
+  .accounts({})
+  .transaction();
+
+//... 백엔드에서 트랜잭션 서명
+
+// 체인으로 트랜잭션 전송
+await sendTransaction(transaction, connection);
+```
+
+여러 Anchor 명령어를 묶으려면 `.instruction()`을 사용하여 명령어 객체를 얻으세요:
+
+```ts
+// 첫 번째 명령어 생성
+const instructionOne = await program.methods
+  .instructionOneName(instructionOneDataInputs)
+  .accounts({})
+  .instruction();
+
+// 두 번째 명령어 생성
+const instructionTwo = await program.methods
+  .instructionTwoName(instructionTwoDataInputs)
+  .accounts({})
+  .instruction();
+
+// 두 명령어를 하나의 트랜잭션에 추가
+const transaction = new Transaction().add(instructionOne, instructionTwo);
+
+// 트랜잭션 전송
+await sendTransaction(transaction, connection);
+```
+
+<ArticleSection name="계정 가져오기 및 필터링" id="fetch-and-filter-accounts" level="h2" />
+
+프로그램이 수백 개의 계정을 생성할 때 이를 추적하는 것은 어려워집니다. Program 객체는 프로그램 계정을 효율적으로 가져오고 필터링하는 메서드를 제공합니다.
+
+특정 계정 유형의 모든 주소를 가져오기:
+
+```ts
+const accounts = await program.account.counter.all();
+```
+
+`memcmp` 플래그를 사용하여 특정 계정 필터링:
+
+```ts
+const accounts = await program.account.counter.all([
+  {
+    memcmp: {
+      offset: 8,
+      bytes: bs58.encode(new BN(0, "le").toArray()),
+    },
+  },
+]);
+```
+
+> 이는 첫 번째 필드가 0인 모든 `Counter` 계정을 가져옵니다.
+
+계정 데이터가 변경됐는지 확인하기 위해 fetch를 사용하여 특정 계정의 역직렬화된 데이터를 가져오기:
+
+```ts
+const account = await program.account.counter.fetch(ACCOUNT_ADDRESS);
+```
+
+여러 계정을 동시에 가져오기:
+
+```ts
+const accounts = await program.account.counter.fetchMultiple([
+  ACCOUNT_ADDRESS_ONE,
+  ACCOUNT_ADDRESS_TWO,
+]);
+```
+
+<ArticleSection name="이벤트 및 웹훅" id="events-and-webhooks" level="h2" />
+
+사용자가 지갑을 연결할 때마다 온체인 데이터를 가져오는 대신, 블록체인을 수신하고 관련 데이터를 데이터베이스에 저장하는 시스템을 설정하세요.
+
+온체인 이벤트를 수신하는 두 가지 주요 접근 방식이 있습니다:
+- 폴링(Polling): 클라이언트가 주기적으로 새 데이터를 확인합니다. 서버는 변경 사항과 관계없이 최신 데이터로 응답하므로 중복 정보를 반환할 수 있습니다.
+- 스트리밍(Streaming): 업데이트가 발생할 때만 서버가 클라이언트로 데이터를 푸시합니다. 관련 변경 사항만 전송되므로 더 효율적이고 실시간 데이터 전송을 제공합니다.
+
+Anchor 명령어를 스트리밍하려면 이벤트를 수신하고 발생 시 서버로 전송하는 웹훅을 사용하세요. 예를 들어, 마켓플레이스에서 NFT 판매가 발생할 때마다 데이터베이스 항목을 업데이트합니다.
+
+> 5ms 차이가 중요한 초지연(low-latency) 애플리케이션의 경우 웹훅이 충분한 속도를 제공하지 못할 수 있습니다.
+
+Anchor는 이벤트를 방출하기 위한 두 가지 매크로를 제공합니다:
+- `emit!()`: `sol_log_data()` 시스템 호출을 사용하여 이벤트를 프로그램 로그로 직접 방출합니다. 이벤트 데이터는 "Program Data" 접두사가 붙은 base64 문자열로 인코딩됩니다.
+- `emit_cpi!()`: 교차 프로그램 호출(CPI)을 통해 이벤트를 방출합니다. 이벤트 데이터는 인코딩되어 프로그램 로그 대신 CPI의 명령어 데이터에 포함됩니다.
+
+### `emit!()` 매크로
+
+프로그램 구현:
+
+```rust
+use anchor_lang::prelude::*;
+ 
+declare_id!("8T7MsCZyzxboviPJg5Rc7d8iqEcDReYR2pkQKrmbg7dy");
+ 
+#[program]
+pub mod event {
+    use super::*;
+ 
+    pub fn emit_event(_ctx: Context<EmitEvent>, input: String) -> Result<()> {
+        emit!(CustomEvent { message: input });
+        Ok(())
+    }
+}
+ 
+#[derive(Accounts)]
+pub struct EmitEvent {}
+ 
+#[event]
+pub struct CustomEvent {
+    pub message: String,
+}
+```
+
+Anchor SDK 도우미를 사용한 클라이언트 사이드 이벤트 수신 및 base64 디코딩:
+
+```ts
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import { Event } from "../target/types/event";
+ 
+describe("event", () => {
+  // 로컬 클러스터를 사용하도록 클라이언트 구성
+  anchor.setProvider(anchor.AnchorProvider.env());
+ 
+  const program = anchor.workspace.Event as Program<Event>;
+ 
+  it("Emits custom event", async () => {
+    // 트랜잭션 전송 전 리스너 설정
+    const listenerId = program.addEventListener("customEvent", event => {
+      // 이벤트 데이터 처리
+      console.log("Event Data:", event);
+    });
+  });
+});
+```
+
+### `emit_cpi!()` 매크로
+
+프로그램 구현:
+
+```rust
+use anchor_lang::prelude::*;
+ 
+declare_id!("2cDQ2LxKwQ8fnFUz4LLrZ157QzBnhPNeQrTSmWcpVin1");
+ 
+#[program]
+pub mod event_cpi {
+    use super::*;
+ 
+    pub fn emit_event(ctx: Context<EmitEvent>, input: String) -> Result<()> {
+        emit_cpi!(CustomEvent { message: input });
+        Ok(())
+    }
+}
+ 
+#[event_cpi]
+#[derive(Accounts)]
+pub struct EmitEvent {}
+ 
+#[event]
+pub struct CustomEvent {
+    pub message: String,
+}
+```
+
+클라이언트 사이드 이벤트 디코딩:
+
+```ts
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import { EventCpi } from "../target/types/event_cpi";
+ 
+describe("event-cpi", () => {
+  // 로컬 클러스터를 사용하도록 클라이언트 구성
+  anchor.setProvider(anchor.AnchorProvider.env());
+  const program = anchor.workspace.EventCpi as Program<EventCpi>;
+ 
+  it("Emits custom event", async () => { 
+    // 트랜잭션 데이터 가져오기
+    const transactionData = await program.provider.connection.getTransaction(
+      transactionSignature,
+      { commitment: "confirmed" },
+    );
+ 
+    // CPI 명령어 데이터에서 이벤트 데이터 디코딩
+    const eventIx = transactionData.meta.innerInstructions[0].instructions[0];
+    const rawData = anchor.utils.bytes.bs58.decode(eventIx.data);
+    const base64Data = anchor.utils.bytes.base64.encode(rawData.subarray(8));
+    const event = program.coder.events.decode(base64Data);
+
+    console.log(event);
+  });
+});
+```

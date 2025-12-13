@@ -1,0 +1,45 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 동결 및 동결 해제 명령어 (Freeze and Thaw Instructions)
+
+동결(Freeze)은 동결 해제될 때까지 계정의 모든 토큰 작업을 방지합니다. 오직 민트의 동결 권한(freeze authority)만이 이 작업을 수행할 수 있습니다.
+
+> 전송, 승인, 소각을 완전히 비활성화하며 특정 동결된 계정에만 영향을 미칩니다.
+
+동결 해제(Thaw)는 이전에 동결된 계정의 토큰 작업을 다시 활성화합니다. 오직 민트의 동결 권한만이 계정을 동결 해제할 수 있습니다.
+
+> 동결된 계정의 전체 기능을 복원하며 민트의 동결 권한에 의해서만 수행될 수 있습니다.
+
+토큰 계정을 동결하거나 동결 해제하기 전에, 다음 사항이 이미 준비되어 있어야 합니다:
+- `freezeAuthority`를 보유하고 있는 초기화된 `Mint` 계정
+- 동결하거나 동결 해제하려는 초기화된 `Token` 계정 또는 `Associated Token` 계정
+
+`freeze_account()` 명령어에 대한 CPI는 다음과 같습니다:
+
+```rust
+freeze_account(
+    CpiContext::new(
+        ctx.accounts.token_program.to_account_info(),
+        FreezeAccount {
+            account: ctx.accounts.token_account.to_account_info(),
+            mint: ctx.accounts.mint.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        },
+    ),
+)?;
+```
+
+그리고 `thaw_account()` 명령어에 대한 CPI는 다음과 같습니다:
+
+```rust
+thaw_account(
+    CpiContext::new(
+        ctx.accounts.token_program.to_account_info(),
+        ThawAccount {
+            account: ctx.accounts.token_account.to_account_info(),
+            mint: ctx.accounts.mint.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        },
+    ),
+)?;
+```

@@ -1,0 +1,243 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 성능 (Performance)
+
+많은 개발자가 계정 필드에 대한 세밀한 제어를 위해 Pinocchio를 찾지만, 진정한 강점은 최대 성능을 가능하게 하는 데 있습니다.
+
+이 섹션에서는 Solana 프로그램에서 최적의 효율성을 달성하기 위한 실용적인 전략을 살펴보겠습니다.
+
+<ArticleSection name="불필요한 검사" id="superfluous-checks" level="h2" />
+
+개발자는 종종 안전을 위해 추가 계정 제약 조건을 추가하지만, 이는 불필요한 오버헤드를 유발할 수 있습니다. 필수 검사와 중복 검사를 구별하는 것이 중요합니다.
+
+예를 들어 `Token Account`나 `Mint`에서 단순히 읽을 때는 역직렬화 및 검증이 필요합니다. 그러나 동일한 계정이 나중에 CPI(Cross-Program Invocation)에서 사용되는 경우 불일치나 오류가 있으면 해당 시점에서 명령어가 실패합니다. 따라서 선제적 검사는 중복될 수 있습니다.
+
+마찬가지로 토큰 계정의 "소유자"를 확인하는 것은 종종 불필요합니다. 특히 계정이 PDA(Program Derived Address)에 의해 제어되는 경우 더욱 그렇습니다. 소유자가 올바르지 않으면 잘못된 시드로 인해 CPI가 실패합니다. PDA가 전송을 실행하지 않는 경우 수신자를 검증하는 데 집중해야 합니다. 특히 PDA 제어 계정으로 입금할 때 발신자의 이익은 프로그램의 이익과 일치하기 때문입니다.
+
+`Escrow`의 예를 들어 보겠습니다:
+
+...
+
+### 연관 토큰 프로그램 (Associated Token Program)
+
+`Associated Token Accounts` (ATA)는 편리하지만 성능 비용이 발생합니다. 절대적으로 필요한 경우가 아니면 사용을 강제하지 말고 명령어 로직 내에서 생성을 요구하지 마십시오. 대부분의 시나리오에서 `init-if-needed` 패턴은 피할 수 있는 복잡성과 리소스 사용을 추가합니다(Jupiter와 같은 라우터로 구성된 Amm 명령어처럼).
+
+프로그램이 ATA에 의존하는 경우 외부에서 생성되었는지 확인하십시오. 프로그램 내에서 다음과 같이 예상 주소를 직접 파생하여 정확성을 확인하십시오:
+
+```rust
+let (associated_token_account, _) = find_program_address(
+    &[
+        self.accounts.owner.key(),
+        self.accounts.token_program.key(),
+        self.accounts.mint.key(),
+    ],
+    &pinocchio_associated_token_account::ID,
+);
+```
+
+불필요한 검사 및 계정 요구 사항을 최소화함으로써 컴퓨팅 비용을 줄이고 프로그램 실행을 간소화하여 네이티브 솔라나 개발의 잠재적인 성능을 최대한 활용할 수 있습니다.
+
+> 명령어를 일찍 실패하게 하는 검사를 추가하는 것은 장점이 있습니다. 소비되는 컴퓨팅 유닛이 확실히 낮아지기 때문입니다. 따라서 명령어가 주로 `{ skipPreflight: true }`와 같은 플래그와 함께 사용될지 여부를 고려하십시오.
+
+<ArticleSection name="Perf 플래그" id="perf-flag" level="h2" />
+
+Rust의 피처 플래그는 코드를 조건부로 컴파일하는 강력한 방법을 제공하여 개발, 테스트 또는 프로덕션에서의 최대 성능과 같은 다양한 빌드 프로필에 대한 기능을 토글할 수 있게 해줍니다.
+
+이는 모든 컴퓨팅 유닛이 중요한 Solana 프로그램에서 특히 유용합니다.
+
+### 피처 플래그 설정 (Setting Up Feature Flags)
+
+피처 플래그는 `Cargo.toml` 파일의 `[features]` 섹션에 정의됩니다. 예를 들어 로깅 및 추가 검사를 비활성화하여 성능 최적화를 활성화하는 `perf` 플래그를 원할 수 있습니다:
+
+```
+[features]
+default = ["perf"]
+perf = []
+```
+
+여기서 perf 기능은 기본적으로 활성화되어 있지만 빌드하거나 테스트할 때 재정의할 수 있습니다.
+
+### 코드에서 피처 플래그 사용 (Using Feature Flags in Code)
+
+Rust의 조건부 컴파일 속성을 사용하여 활성 기능에 따라 코드를 포함하거나 제외할 수 있습니다. 예를 들어:
+
+```rust
+pub fn process(ctx: Context<'info>) -> ProgramResult {
+    #[cfg(not(feature = "perf"))]
+    sol_log("Create Class");
+    Self::try_from(ctx)?.execute()
+}
+```
+
+대부분의 프로그램은 디버깅을 더 쉽게 만들고 올바른 명령어가 호출되었는지 확인하기 위해 명령어 이름을 로그로 반환합니다.
+
+그러나 이것은 비용이 많이 들고 탐색기를 더 읽기 쉽게 만들고 디버깅을 향상시키는 것 외에는 실제로 필요하지 않습니다.
+
+```rust
+#[cfg(not(feature = "perf"))]
+if name.len() > MAX_NAME_LEN {
+    return Err(ProgramError::InvalidArgument);
+}
+```
+
+또 다른 예는 앞서 논의한 불필요한 검사입니다.
+
+이러한 검사 없이도 명령어가 안전하다는 것을 안다면 기본값으로 만들지 말고 플래그 뒤에 숨겨야 합니다.
+
+> 이 예제에서는 프로그램을 가능한 한 성능 좋게 만들고 싶다면 컴파일 중에 perf 플래그를 사용해야 함을 나타내기 위해 `perf` 플래그를 만들었습니다.
+
+### 다른 플래그로 빌드 (Building with Different Flags)
+
+`perf` 기능이 있거나 없는 프로그램을 빌드하려면 다음을 사용하십시오:
+
+- 성능 최적화 포함 (기본값):
+
+```
+cargo build-bpf
+```
+
+- 추가 검사 및 로깅 포함:
+
+```
+cargo build-bpf --no-default-features
+```
+
+이 접근 방식을 사용하면 피처 플래그를 토글하기만 하면 개발 안전 또는 프로덕션 속도를 위해 조정할 수 있는 단일 코드베이스를 유지할 수 있습니다.
+
+<ArticleSection name="비트 연산" id="bitwise-operations" level="h2" />
+
+효율적인 작업에 대해 논의할 때 불리언은 가장 낭비되는 요소 중 하나입니다. 고려해 보십시오: 0 또는 1이라는 두 가지 가능한 값만 나타내는 데 1바이트를 차지합니다.
+
+코드에 여러 개의 불리언이 있는 경우 비트 조작을 사용하여 훨씬 효율적으로 저장할 수 있습니다. 비트 연산을 사용하면 단일 바이트에 최대 8개의 서로 다른 불리언 값을 저장할 수 있습니다.
+
+### 플래그 정의 (Flag Definition)
+
+왼쪽 시프트 연산을 사용하여 플래그를 비트 위치로 정의합니다:
+
+```rust
+const FLAG_ACTIVE: u8 = 1 << 0;     // 0000_0001
+const FLAG_VERIFIED: u8 = 1 << 1;   // 0000_0010
+const FLAG_PREMIUM: u8 = 1 << 2;    // 0000_0100
+const FLAG_LOCKED: u8 = 1 << 3;     // 0000_1000
+```
+
+플래그를 설정하려면 다음을 수행하면 됩니다:
+
+```rust
+let mut flags = 0u8;           // flags = 0000_0000
+
+flags |= FLAG_ACTIVE;          // flags = 0000_0001
+flags |= FLAG_VERIFIED;        // flags = 0000_0011
+flags |= FLAG_PREMIUM | FLAG_LOCKED;  // flags = 0000_1111
+```
+
+`|` (OR 연산자)는 다른 비트에 영향을 주지 않고 특정 비트를 "켜는" 데 완벽합니다. 0과 OR하면 원래 비트가 유지되고 1과 OR하면 결과는 항상 1이 됩니다(플래그가 설정됨).
+
+플래그가 활성 상태인지 확인하려면 다음과 같이 할 수 있습니다:
+
+```rust
+let flags = 0b0000_0101u8;  // ACTIVE 및 PREMIUM 플래그 설정됨
+
+// 단일 플래그가 설정되었는지 확인
+if flags & FLAG_ACTIVE != 0 {
+    println!("Account is active");
+}
+
+// 여러 플래그가 설정되었는지 확인
+if (flags & (FLAG_ACTIVE | FLAG_PREMIUM)) == (FLAG_ACTIVE | FLAG_PREMIUM) {
+    println!("Account is both active and premium");
+}
+
+// 여러 플래그 중 하나라도 설정되었는지 확인
+if flags & (FLAG_VERIFIED | FLAG_PREMIUM) != 0 {
+    println!("Account is either verified or premium (or both)");
+}
+```
+
+`&` (AND 연산자)는 특정 비트를 "마스킹"하여 값을 확인하는 데 완벽합니다. 0과 AND하면 결과는 항상 0이고 1과 AND하면 원래 비트가 유지됩니다.
+
+대신 플래그를 지우거나 토글하려면 다음과 같이 할 수 있습니다:
+
+```rust
+let mut flags = 0b0000_1111u8;      // 모든 플래그 설정됨
+
+// 단일 플래그 지우기
+flags &= !FLAG_ACTIVE;              // flags = 0000_1110
+
+// 한 번에 여러 플래그 지우기
+flags &= !(FLAG_VERIFIED | FLAG_PREMIUM);   // flags = 0000_1000
+
+// 단일 플래그 토글
+flags ^= FLAG_ACTIVE;               // flags = 0000_1001 (이제 VERIFIED 가짐)
+flags ^= FLAG_LOCKED;               // flags = 0000_0001 (LOCKED 이제 지워짐)
+
+// 한 번에 여러 플래그 토글
+flags ^= FLAG_PREMIUM | FLAG_LOCKED;        // flags = 0000_1011
+```
+
+<ArticleSection name="Solana의 메모리" id="memory-on-solana" level="h2" />
+
+Solana 가상 머신(SVM)은 스택 메모리(로컬 변수), 힙 메모리(동적 구조체) 및 계정 공간(영구 스토리지)을 엄격하게 분리하는 3계층 메모리 아키텍처를 사용합니다.
+
+이 아키텍처를 이해하는 것은 고성능 Solana 프로그램을 작성하는 데 중요합니다.
+
+프로그램은 예측 가능한 메모리 매핑이 있는 고정 가상 주소 공간 내에서 작동합니다:
+- **프로그램 코드**: `0x100000000` - 컴파일된 프로그램 바이트코드가 있는 곳
+- **스택 데이터**: `0x200000000` - 로컬 변수 및 함수 호출 프레임
+- **힙 데이터**: `0x300000000` - 동적 할당 (비용이 많이 듭니다!)
+
+이 결정론적 레이아웃은 강력한 최적화를 가능하게 하지만 엄격한 성능 제약도 만듭니다.
+
+> Solana는 엄격한 메모리 제한을 부과합니다: 함수 호출당 4KB 스택 프레임 및 프로그램 실행당 총 32KB 힙 공간.
+
+### 제로 할당 이점 (The Zero-Allocation Advantage)
+
+Pinocchio의 주요 성능 혁신은 모든 것에 힙 할당 대신 참조를 사용하는 것입니다.
+
+이 접근 방식은 **SVM이 이미 모든 프로그램 입력을 메모리에 로드하므로** 해당 데이터를 새 힙 할당으로 복사하는 것은 순전히 낭비라는 핵심 통찰력을 활용합니다.
+
+힙 할당이 본질적으로 나쁜 것은 아니지만 Solana에서는 비용이 많이 들고 복잡합니다. 모든 할당이 소중한 컴퓨팅 유닛을 소비하기 때문입니다. 각 할당은 제한된 힙 공간을 조각화하고 정리 작업은 추가 컴퓨팅 유닛을 소비합니다.
+
+### 제로 할당 기술 (Zero-Allocation Techniques)
+
+1. 참조 기반 데이터 구조 - 소유된 데이터를 차용된 참조로 변환:
+    ```rust
+    // 힙 할당:
+    struct AccountInfo {
+        key: Pubkey,        // 소유된 데이터 - 힙에 복사됨
+        data: Vec<u8>,      // 벡터 - 확실히 힙 할당됨
+    }
+
+    // 제로 할당:
+    struct AccountInfo<'a> {
+        key: &'a Pubkey,    // 참조 - 할당 없음
+        data: &'a [u8],     // 슬라이스 참조 - 할당 없음
+    }
+    ```
+
+2. 제로 카피 데이터 액세스 - 역직렬화 없이 제자리에서 데이터 액세스:
+    ```rust
+    // 역직렬화 대신 제자리에서 데이터 액세스:
+    pub fn process_transfer(accounts: &[u8], instruction_data: &[u8]) {
+        // 바이트 슬라이스에서 직접 계정 구문 분석 - 힙 할당 없음
+        let source_account = &accounts[0..36];  // 그냥 슬라이스 참조
+        let dest_account = &accounts[36..72];
+
+        // 포인터 산술을 통해 필드 액세스 - 할당 없음
+        let amount = u64::from_le_bytes(instruction_data[0..8].try_into().unwrap());
+    }
+    ```
+
+3. No-Std 제약 조건 - 컴파일 타임에 우발적인 힙 사용 방지:
+    ```rust
+    // 우발적인 힙 사용을 방지하기 위해 no-std 강제:
+    #![no_std]
+    ```
+
+### Pinocchio 메모리 할당자 (Pinocchio Memory Allocator)
+
+힙을 전혀 할당하지 않으려면 Pinocchio가 이를 확인하는 특수 매크로인 `no_allocator!()`를 제공합니다.
+
+> 설정하지 않으면 Pinocchio는 기존 힙 작업이 필요한 프로그램에 대해 `default_allocator!()`를 사용합니다.
+
+이 외에도 항상 자체적으로 정리하는 방법을 아는 더 나은 힙 할당자를 작성할 수 있습니다. 이 접근 방식에 관심이 있다면 [여기 예제](https://github.com/solana-labs/solana-program-library/blob/master/examples/rust/custom-heap/src/entrypoint.rs)가 있습니다.
