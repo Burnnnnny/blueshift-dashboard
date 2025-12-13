@@ -1,0 +1,26 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# SPL 토큰 만들기 (Mint an SPL Token)
+
+![Mint an SPL Token Challenge](/graphics/challenge-banners/typescript-mint-an-spl-token.png)
+
+SPL 토큰 프로그램, 특히 TypeScript를 사용하여 일부 토큰을 발행하는 것은 솔라나 개발자로서의 여정에서 첫 번째 출발점이 되어야 합니다.
+
+SPL 토큰 프로그램을 처음 접하는 경우 [이 과정](/ko/courses/spl-token-with-web3js)을 먼저 따르세요!
+
+이 챌린지에서는 다음 네 가지 간단한 명령어를 구현할 것입니다:
+
+- **민트 생성 (Create a Mint)**: 로우(raw) 명령어 또는 SDK가 제공하는 추상화된 명령어를 사용하여 `Mint Account`를 생성합니다.
+- **민트 초기화 (Initialize Mint)**: 로우 명령어 또는 SDK가 제공하는 추상화된 명령어를 사용하여 생성된 `Mint Account`를 초기화합니다. *민트는 6자리의 소수점을 가져야 하며, 민트 권한은 코드를 실행하는 지갑으로 설정되고, 동결 권한은 없어야 합니다.*
+- **연관 토큰 계정 생성 (Create an Associated Token Account)**: 로우 명령어 또는 SDK가 제공하는 추상화된 명령어를 사용하여 `Associated Token Account`를 생성하고 초기화합니다.
+- **2,100만 토큰 발행 (Mint 21 million Tokens)**: 새로 생성된 `Associated Token Account`로 2,100만 개(21,000,000)의 새로 생성된 토큰을 발행합니다.
+
+**참고**: TypeScript와 함께 SPL-Token 프로그램을 사용하는 방법에 익숙하지 않은 경우 [Web3.js를 사용한 SPL 토큰](/ko/courses/spl-token-with-web3js)을 읽고 이 챌린지에서 필요한 SDK에 익숙해져야 합니다.
+
+<ArticleSection name="Blueshift 샌드박스 환경" id="blueshift-sandbox-environment" level="h2" />
+
+이 챌린지는 **Blueshift 샌드박스 환경**에서 완료하도록 설계되었습니다.
+
+이 제로 설정(zero-config) 샌드박스에는 챌린지를 완료하는 데 필요한 모든 것이 함께 제공됩니다. 격리된 환경에서 유형 지원, 사전 패키지된 라이브러리, 지갑 및 RPC 노드가 있는 내장 편집기에 액세스할 수 있습니다.
+
+코딩을 시작할 준비가 되셨나요? 아래 버튼을 클릭하여 샌드박스를 열고 챌린지를 시작하세요.

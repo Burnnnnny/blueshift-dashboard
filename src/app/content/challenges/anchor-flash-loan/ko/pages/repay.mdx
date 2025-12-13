@@ -1,0 +1,49 @@
+# 상환 (Repay)
+
+상환 명령어는 빌린 자금이 적절한 수수료와 함께 반환되도록 하여 플래시 론 주기를 완료합니다. 이 명령어는 두 가지 필수 단계를 수행합니다:
+1. 대출 금액 추출: 명령어 인트로스펙션을 사용하여 대출 명령어의 데이터에서 원래 `amount_borrowed`를 검색합니다.
+2. 자금 반환: `fee`를 계산하고 빌린 금액에 수수료를 더한 금액을 프로토콜로 반환합니다.
+
+<ArticleSection name="명령어 인트로스펙션" id="instruction-introspection" level="h2" />
+
+먼저 트랜잭션의 첫 번째 명령어를 검사하여 원래 대출 금액을 추출해야 합니다:
+
+```rust
+let ixs = ctx.accounts.instructions.to_account_info();
+
+let mut amount_borrowed: u64;
+
+if let Ok(borrow_ix) = load_instruction_at_checked(0, &ixs) {
+    // Check the amount borrowed:
+    let mut borrowed_data: [u8;8] = [0u8;8];
+    borrowed_data.copy_from_slice(&borrow_ix.data[8..16]);
+    amount_borrowed = u64::from_le_bytes(borrowed_data)
+
+} else {
+    return Err(ProtocolError::MissingBorrowIx.into());
+}
+```
+
+> 프로그램 ID와 구분자를 사용하여 이것이 실제 `borrow_ix`인지 확인하지 않습니다. "가짜" 명령어를 구성하더라도 프로토콜은 돈을 받기만 하면 되므로 안전하기 때문입니다. 동시에 우리가 돈을 빌려줬다면 그것이 첫 번째 명령어이고 `amount_borrowed`가 그곳에 있을 것임을 알 수 있습니다.
+
+<ArticleSection name="자금 이체" id="transfer-funds" level="h2" />
+
+다음으로 프로토콜 수수료를 계산하고 총액을 반환합니다:
+
+```rust
+// Add the fee to the amount borrowed (In our case we hardcoded it to 500 basis point)
+let fee = (amount_borrowed as u128).checked_mul(500).unwrap().checked_div(10_000).ok_or(ProtocolError::Overflow)? as u64;
+amount_borrowed = amount_borrowed.checked_add(fee).ok_or(ProtocolError::Overflow)?;
+
+// Transfer the funds from the protocol to the borrower
+transfer(
+    CpiContext::new(ctx.accounts.token_program.to_account_info(), Transfer {
+        from: ctx.accounts.borrower_ata.to_account_info(),
+        to: ctx.accounts.protocol_ata.to_account_info(),
+        authority: ctx.accounts.borrower.to_account_info(),
+    }), 
+    amount_borrowed
+)?;
+```
+
+수수료는 500bp(basis point)로 하드 코딩되어 있으며, 매우 큰 숫자로 악용될 수 있는 오버플로가 발생하지 않도록 "확인된(checked)" 수학을 수행합니다. 또한 중간 오버플로를 방지하기 위해 곱셈을 위해 금액을 `u128`로 변환한 다음 안전하게 `u64`로 다시 캐스팅합니다.

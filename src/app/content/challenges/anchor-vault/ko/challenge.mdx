@@ -1,0 +1,206 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+![Anchor Vault Challenge](/graphics/challenge-banners/anchor-vault.png)
+
+# 금고 (The Vault)
+
+금고(Vault)는 사용자가 자산을 안전하게 보관할 수 있도록 합니다. 금고는 DeFi의 기본적인 구성 요소로, 그 핵심은 사용자가 자산(이 경우 lamports)을 안전하게 보관하고 나중에 동일한 사용자만 인출할 수 있도록 하는 것입니다.
+
+이 챌린지에서는 기본 계정, PDA(Program Derived Addresses), CPI(Cross-Program Invocation)를 사용하는 방법을 보여주는 간단한 램포트 금고를 만들 것입니다. Anchor에 익숙하지 않은 경우 [Anchor 소개](/ko/courses/introduction-to-anchor)를 읽고 이 프로그램에서 사용할 핵심 개념을 숙지해야 합니다.
+
+<ArticleSection name="설치" id="installation" level="h2" />
+
+시작하기 전에 Rust와 Anchor가 설치되어 있는지 확인하세요(다시 확인해야 하는 경우 [공식 문서](https://www.anchor-lang.com/docs/installation) 참조). 그런 다음 터미널에서 다음을 실행합니다:
+
+```bash
+anchor init blueshift_anchor_vault
+```
+
+이 챌린지에는 추가적인 크레이트가 필요하지 않으므로 새로 생성된 폴더를 열고 코딩을 시작할 준비가 되었습니다!
+
+<ArticleSection name="템플릿" id="template" level="h2" />
+
+기본 프로그램 구조부터 시작하겠습니다. 간단한 프로그램이므로 `lib.rs`에서 모든 것을 구현할 것입니다. 필요한 핵심 구성 요소가 포함된 초기 템플릿은 다음과 같습니다:
+
+```rust
+declare_id!("22222222222222222222222222222222222222222222");
+
+#[program]
+pub mod blueshift_anchor_vault {
+    use super::*;
+
+    pub fn deposit(ctx: Context<VaultAction>, amount: u64) -> Result<()> {
+        // deposit logic
+        Ok(())
+    }
+
+    pub fn withdraw(ctx: Context<VaultAction>) -> Result<()> {
+        // withdraw logic
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct VaultAction<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"vault", signer.key().as_ref()],
+        bump,
+    )]
+    pub vault: SystemAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[error_code]
+pub enum VaultError {
+    // error enum
+}
+```
+
+**참고**: 내부적으로 프로그램을 테스트하는 데 사용하므로 프로그램 ID를 `22222222222222222222222222222222222222222222`로 변경하는 것을 잊지 마십시오.
+
+<ArticleSection name="계정 (Accounts)" id="accounts" level="h2" />
+
+두 명령어 모두 동일한 계정을 사용하므로 더 쉽고 읽기 쉽게 만들기 위해 `VaultAction`이라는 하나의 컨텍스트를 만들어 `deposit`과 `withdraw` 모두에 사용할 수 있습니다.
+
+`VaultAction` 계정 구조체에는 다음이 필요합니다:
+- `signer`: 금고의 소유자이며 금고를 만든 후 램포트를 인출할 수 있는 유일한 사람입니다.
+- `vault`: 서명자를 위해 램포트를 보유하는 `[b"vault", signer.key().as_ref()]` 시드에서 파생된 PDA입니다.
+- `system_program`: 시스템 프로그램의 전송 명령어 CPI를 사용할 것이므로 포함해야 하는 시스템 프로그램 계정입니다.
+
+계정 구조체를 정의하는 방법은 다음과 같습니다:
+
+```rust
+#[derive(Accounts)]
+pub struct VaultAction<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"vault", signer.key().as_ref()],
+        bump,
+    )]
+    pub vault: SystemAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+```
+
+각 계정 제약 조건을 분석해 보겠습니다:
+
+
+1. `signer`: 이체 중에 램포트를 수정할 것이므로 `mut` 제약 조건이 필요합니다.
+2. `vault`:
+    - 램포트를 수정할 것이므로 `mut`입니다.
+    - `seeds` & `bumps`는 시드에서 유효한 PDA를 파생하는 방법을 정의합니다.
+3. `system_program`: 계정이 실행 가능하도록 설정되었는지 확인하고 주소가 시스템 프로그램의 주소인지 확인합니다.
+
+<ArticleSection name="오류 (Errors)" id="errors" level="h2" />
+
+이 작은 프로그램에는 많은 오류가 필요하지 않으므로 2개의 열거형만 만들 것입니다:
+- `VaultAlreadyExists`: 계정에 이미 램포트가 있는지 알려줍니다. 이는 금고가 이미 존재함을 의미하기 때문입니다.
+- `InvalidAmount`: 기본 계정의 최소 렌트비보다 적은 금액을 예치할 수 없으므로 금액이 그보다 큰지 확인합니다.
+
+다음과 비슷할 것입니다:
+
+```rust
+#[error_code]
+pub enum VaultError {
+    #[msg("Vault already exists")]
+    VaultAlreadyExists,
+    #[msg("Invalid amount")]
+    InvalidAmount,
+}
+```
+
+<ArticleSection name="예치 (Deposit)" id="deposit" level="h2" />
+
+예치 명령어는 다음 단계를 수행합니다:
+1. 금고가 비어 있는지(램포트가 0인지) 확인하여 이중 예치를 방지합니다.
+2. 예치 금액이 `SystemAccount`의 렌트 면제(rent-exempt) 최소 금액을 초과하는지 확인합니다.
+3. 시스템 프로그램에 대한 CPI를 사용하여 램포트를 서명자에서 금고로 전송합니다.
+
+이러한 확인을 먼저 구현해 보겠습니다:
+
+```rust
+// Check if vault is empty
+require_eq!(ctx.accounts.vault.lamports(), 0, VaultError::VaultAlreadyExists);
+
+// Ensure amount exceeds rent-exempt minimum
+require_gt!(amount, Rent::get()?.minimum_balance(0), VaultError::InvalidAmount);
+```
+
+두 개의 `require` 매크로는 사용자 정의 가드 절(guard clauses)처럼 작동합니다:
+- `require_eq!`는 금고가 비어 있는지 확인합니다(이중 예치 방지).
+- `require_gt!`는 금액이 렌트 면제 임계값을 넘는지 확인합니다.
+
+확인이 통과되면 Anchor의 시스템 프로그램 헬퍼가 다음과 같이 `Transfer` CPI를 호출합니다:
+
+```rust
+use anchor_lang::system_program::{transfer, Transfer};
+
+transfer(
+    CpiContext::new(
+        ctx.accounts.system_program.to_account_info(),
+        Transfer {
+            from: ctx.accounts.signer.to_account_info(),
+            to: ctx.accounts.vault.to_account_info(),
+        },
+    ),
+    amount,
+)?;
+```
+
+<ArticleSection name="인출 (Withdraw)" id="withdraw" level="h2" />
+
+인출 명령어는 다음 단계를 수행합니다:
+1. 금고에 램포트가 포함되어 있는지(비어 있지 않은지) 확인합니다.
+2. 금고의 PDA를 사용하여 자체적으로 전송에 서명합니다.
+3. 모든 램포트를 금고에서 다시 서명자에게 전송합니다.
+
+먼저 금고에 인출할 램포트가 있는지 확인해 보겠습니다:
+
+```rust
+// Check if vault has any lamports
+require_neq!(ctx.accounts.vault.lamports(), 0, VaultError::InvalidAmount);
+```
+
+그런 다음 PDA 서명자 시드를 생성하고 전송을 수행해야 합니다:
+
+```rust
+// Create PDA signer seeds
+let signer_key = ctx.accounts.signer.key();
+let signer_seeds = &[b"vault", signer_key.as_ref(), &[ctx.bumps.vault]];
+
+// Transfer all lamports from vault to signer
+transfer(
+    CpiContext::new_with_signer(
+        ctx.accounts.system_program.to_account_info(),
+        Transfer {
+            from: ctx.accounts.vault.to_account_info(),
+            to: ctx.accounts.signer.to_account_info(),
+        },
+        &[&signer_seeds[..]]
+    ),
+    ctx.accounts.vault.lamports()
+)?;
+```
+
+이 인출의 보안은 두 가지 요인에 의해 보장됩니다:
+1. 금고의 PDA는 서명자의 공개 키를 사용하여 파생되므로 원래 예금자만 인출할 수 있습니다.
+2. PDA의 전송 서명 능력은 `CpiContext::new_with_signer`에 제공하는 시드를 통해 검증됩니다.
+
+<ArticleSection name="결론 (Conclusion)" id="conclusion" level="h2" />
+
+이제 우리의 단위 테스트에 대해 프로그램을 테스트하고 NFT를 청구할 수 있습니다!
+
+터미널에서 다음 명령을 사용하여 프로그램을 빌드하는 것으로 시작하세요
+
+```bash
+anchor build
+```
+
+그러면 `target/deploy` 폴더에 `.so` 파일이 직접 생성됩니다.
+
+이제 `take challenge` 버튼을 클릭하고 거기에 파일을 놓으세요!

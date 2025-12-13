@@ -1,0 +1,164 @@
+import { ArticleSection } from "../../../../../components/ArticleSection/ArticleSection";
+
+<ArticleSection name="Take" id="take" level="h2" />
+
+이제 `take.rs`에 있으며 다음 작업을 수행할 `take` 명령어로 이동할 수 있습니다:
+- 에스크로 기록을 닫고 렌트 램포트(rent lamports)를 메이커에게 다시 보냅니다.
+- Token A를 금고에서 테이커에게 이동시킨 다음 금고를 닫습니다.
+- 약속된 양의 Token B를 테이커에서 메이커에게 이동합니다.
+
+### 계정 (Accounts)
+
+이 컨텍스트에 필요한 계정은 다음과 같습니다:
+- `taker`: `maker`의 조건을 수락하고 교환을 수행하는 사용자
+- `maker`: 처음에 조건을 설정한 사용자
+- `escrow`: 이 교환의 모든 조건이 있는 계정
+- `mint_a`: `maker`가 예치한 토큰
+- `mint_b`: `maker`가 교환으로 원하는 토큰
+- `vault`: `taker`에게 토큰을 보낼 `escrow` 및 `mint_a`와 연결된 토큰 계정
+- `taker_ata_a`: `vault`에서 토큰을 받을 `taker` 및 `mint_a`와 연결된 토큰 계정
+- `taker_ata_b`: `maker`에게 토큰을 보낼 `taker` 및 `mint_b`와 연결된 토큰 계정
+- `maker_ata_b`: `taker`에게 토큰을 받을 `maker` 및 `mint_b`와 연결된 토큰 계정
+- `associated_token_program`: 연결된 토큰 계정을 생성하는 데 사용되는 연결된 토큰 프로그램
+- `token_program`: 전송을 CPI하는 데 사용되는 토큰 프로그램
+- `system_program`: `Escrow`를 생성하는 데 사용되는 시스템 프로그램
+
+그리고 모든 제약 조건을 사용하면 다음과 비슷해질 것입니다:
+
+```rust
+#[derive(Accounts)]
+pub struct Take<'info> {
+    #[account(mut)]
+    pub taker: Signer<'info>,
+    #[account(mut)]
+    pub maker: SystemAccount<'info>,
+    #[account(
+        mut,
+        close = maker,
+        seeds = [b"escrow", maker.key().as_ref(), escrow.seed.to_le_bytes().as_ref()],
+        bump = escrow.bump,
+        has_one = maker @ EscrowError::InvalidMaker,
+        has_one = mint_a @ EscrowError::InvalidMintA,
+        has_one = mint_b @ EscrowError::InvalidMintB,
+    )]
+    pub escrow: Box<Account<'info, Escrow>>,
+
+    /// Token Accounts
+    pub mint_a: Box<InterfaceAccount<'info, Mint>>,
+    pub mint_b: Box<InterfaceAccount<'info, Mint>>,
+    #[account(
+        mut,
+        associated_token::mint = mint_a,
+        associated_token::authority = escrow,
+        associated_token::token_program = token_program
+    )]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed,
+        payer = taker,
+        associated_token::mint = mint_a,
+        associated_token::authority = taker,
+        associated_token::token_program = token_program
+    )]
+    pub taker_ata_a: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        mut,
+        associated_token::mint = mint_b,
+        associated_token::authority = taker,
+        associated_token::token_program = token_program
+    )]
+    pub taker_ata_b: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed,
+        payer = taker,
+        associated_token::mint = mint_b,
+        associated_token::authority = maker,
+        associated_token::token_program = token_program
+    )]
+    pub maker_ata_b: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// Programs
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+```
+
+### 로직 (Logic)
+
+로직에서는 `taker_ata_b`에서 `maker_ata_b`로 토큰을 전송하는 것으로 시작합니다; 그런 다음 이제 비어 있는 금고를 닫기 전에 `vault`에서 `taker_ata_a`로 토큰을 전송하는 것으로 넘어갑니다:
+
+```rust
+impl<'info> Take<'info> {
+    fn transfer_to_maker(&mut self) -> Result<()> {
+        transfer_checked(
+            CpiContext::new(
+                self.token_program.to_account_info(),
+                TransferChecked {
+                    from: self.taker_ata_b.to_account_info(),
+                    to: self.maker_ata_b.to_account_info(),
+                    mint: self.mint_b.to_account_info(),
+                    authority: self.taker.to_account_info(),
+                },
+            ),
+            self.escrow.receive,
+            self.mint_b.decimals,
+        )?;
+
+        Ok(())
+    }
+
+    fn withdraw_and_close_vault(&mut self) -> Result<()> {
+        // Create the signer seeds for the Vault
+        let signer_seeds: [&[&[u8]]; 1] = [&[
+            b"escrow",
+            self.maker.to_account_info().key.as_ref(),
+            &self.escrow.seed.to_le_bytes()[..],
+            &[self.escrow.bump],
+        ]];
+
+        // Transfer Token A (Vault -> Taker)
+        transfer_checked(
+            CpiContext::new_with_signer(
+                self.token_program.to_account_info(),
+                TransferChecked {
+                    from: self.vault.to_account_info(),
+                    to: self.taker_ata_a.to_account_info(),
+                    mint: self.mint_a.to_account_info(),
+                    authority: self.escrow.to_account_info(),
+                },
+                &signer_seeds,
+            ),
+            self.vault.amount,
+            self.mint_a.decimals,
+        )?;
+
+        // Close the Vault
+        close_account(CpiContext::new_with_signer(
+            self.token_program.to_account_info(),
+            CloseAccount {
+                account: self.vault.to_account_info(),
+                authority: self.escrow.to_account_info(),
+                destination: self.maker.to_account_info(),
+            },
+            &signer_seeds,
+        ))?;
+
+        Ok(())
+    }
+}
+```
+
+이제 `handler` 함수를 생성하고 이번에는 다행히 추가 확인을 수행할 필요가 없으므로 다음과 같이 보일 것입니다:
+
+```rust
+pub fn handler(ctx: Context<Take>) -> Result<()> {
+    // Transfer Token B to Maker
+    ctx.accounts.transfer_to_maker()?;
+
+    // Withdraw and close the Vault
+    ctx.accounts.withdraw_and_close_vault()?;
+
+    Ok(())
+}
+```

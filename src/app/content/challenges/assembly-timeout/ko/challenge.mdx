@@ -1,0 +1,99 @@
+import ArticleSection from "../../../../components/ArticleSection/ArticleSection";
+
+# 어셈블리 타임아웃 (Assembly Timeout)
+
+![Assembly Timeout Challenge](/graphics/challenge-banners/assembly-timeout.png)
+
+이 유닛에서는 sBPF 어셈블리를 사용하여 슬롯 높이 마감을 시행하는 시간 기반 검증 명령어를 만들 것입니다.
+
+이 명령어를 트랜잭션에 포함하면 지정된 블록체인 시간 이후 실행을 방지하는 안전 장치(fail-safe) 메커니즘을 만들어 지연된 트랜잭션 실행이나 오래된 명령어 재생으보부터 보호합니다.
+
+타임아웃 확인을 어셈블리에 이상적으로 만드는 몇 가지 속성이 있습니다:
+- 단일의, 제한된 사용 사례
+- 시스템 변수의 효율적인 활용
+- 복잡한 계정 검증이 필요 없음
+- 트랜잭션 안전성만 향상시킴
+
+어셈블리 프로그래밍에 익숙하지 않은 경우 [어셈블리 소개 과정](/ko/courses/introduction-to-assembly)을 따르세요.
+
+<ArticleSection name="프로그램 설계" id="program-design" level="h2" />
+
+우리 프로그램은 중요한 시간적 작업을 구현합니다. 즉, 현재 블록체인 슬롯 높이가 미리 정해진 마감을 초과하지 않았는지 검증하는 것입니다. 이 패턴은 오래된 차익 거래 시도 방지에서 경매 마감 시행에 이르기까지 시간에 민감한 DeFi 작업에 필수적입니다.
+
+프로그램이 예상하는 것:
+- 명령어 데이터의 8바이트 최대 슬롯 높이.
+- `sol_get_clock_sysvar`를 통한 Solana의 Clock sysvar 액세스.
+- 현재 슬롯 ≤ 최대 슬롯이면 성공을 반환하고, 그렇지 않으면 오류를 반환.
+
+<ArticleSection name="메모리 오프셋" id="memory-offsets" level="h2" />
+
+sBPF 프로그램은 연속적인 메모리 영역으로 계정 데이터를 받습니다. 이 상수들은 해당 메모리 내의 바이트 오프셋을 정의합니다.
+
+우리 프로그램은 0개의 계정을 수락하므로 `MAX_SLOT_HEIGHT`(명령어 데이터로 전달됨)가 위치할 곳을 계산할 수 있습니다. 또한 스택에 `Clock` sysvar 데이터를 저장할 것이므로 `CURRENT_SLOT_HEIGHT`는 음수가 됩니다.
+
+이 상수들은 우리의 메모리 레이아웃을 정의합니다:
+
+```sbpf
+.equ NUM_ACCOUNTS, 0x0000
+.equ MAX_SLOT_HEIGHT, 0x0010
+.equ CURRENT_SLOT_HEIGHT, -0x0028
+```
+
+- `NUM_ACCOUNTS` (0x0000): 검증을 위해 명령어 데이터 헤더의 계정 수를 가리킵니다.
+- `MAX_SLOT_HEIGHT` (0x0010): 명령어 데이터 페이로드 내의 8바이트 마감 슬롯 높이를 찾습니다.
+- `CURRENT_SLOT_HEIGHT` (-0x0028): Clock sysvar의 슬롯 필드가 저장될 스택 오프셋입니다. 슬롯은 Clock 구조의 첫 번째 필드이므로 이 오프셋은 슬롯을 직접 가리킵니다.
+
+메모리 레이아웃을 추상화하는 고급 언어와 달리 어셈블리에서는 모든 데이터가 어디에 있는지 정확히 알아야 합니다.
+
+<ArticleSection name="진입점 및 초기 검증" id="entrypoint-and-validations" level="h2" />
+
+```sbpf
+.globl entrypoint
+entrypoint:
+  ldxdw r0, [r1+NUM_ACCOUNTS]       // Veto if any accounts are included
+  ldxdw r2, [r1+MAX_SLOT_HEIGHT]    // Store target slot height
+```
+
+모든 sBPF 프로그램은 글로벌 `.entrypoint` 심볼에서 시작합니다. Solana 런타임은 레지스터 `r1`을 통해 계정 및 명령어 데이터를 제공합니다.
+
+`ldxdw` 명령어는 메모리에서 8바이트(double word, `dx`) 값을 레지스터로 로드(`ldx`)합니다. 일어나는 일은 다음과 같습니다:
+- `ldxdw r0, [r1+NUM_ACCOUNTS]`: 계정 수를 `r0`에 로드합니다. `r0`는 VM이 종료될 때 읽는 레지스터이므로 0이 아닌 값은 자동으로 프로그램을 실패하게 합니다(계정이 전달된 경우 우리가 원하는 것입니다).
+- `ldxdw r2, [r1+MAX_SLOT_HEIGHT]`: 명령어 데이터에 전달한 최대 허용 슬롯 높이를 가리킵니다. 이 64비트 값은 `r2`에 로드됩니다.
+
+두 작업 모두 무복사(zero-copy)입니다. 직렬화 오버헤드 없이 계정 데이터에서 직접 읽습니다.
+
+<ArticleSection name="Clock Sysvar" id="the-clock-sysvar" level="h2" />
+
+```sbpf
+mov64 r1, r10
+add64 r1, CURRENT_SLOT_HEIGHT
+call sol_get_clock_sysvar
+ldxdw r1, [r1+0x0000]
+```
+
+`sol_get_clock_sysvar` 시스템 호출은 현재 `Clock` 데이터를 `r1`에 지정된 메모리 주소에 씁니다.
+
+Clock 구조체는 40바이트(각각 8바이트만 보유하는 레지스터에는 너무 큼)이므로 자동 정리가 포함된 빠른 할당 없는 저장을 위해 스택을 사용합니다.
+
+`r10`은 읽기 전용이므로 스택에서 작업하려면 메모리 주소를 레지스터로 복사해야 합니다: `mov64 r1, r10`
+
+그런 다음 `r1`에 `CURRENT_SLOT_HEIGHT`(-0x0028)를 더합니다. 이 상수는 음수이므로 실제로는 뺄셈입니다: `r1 = r10 - 40 bytes`, 스택에 40바이트를 할당합니다.
+
+`sol_get_clock_sysvar` 함수를 호출한 후 `r1`에는 슬롯 값 자체가 아니라 Clock 데이터가 기록된 메모리 주소가 포함됩니다. 따라서 `ldxdw r1, [r1+0x0000]`을 사용하여 실제 슬롯 값을 로드합니다.
+
+<ArticleSection name="시간 비교 로직" id="temporal-comparison-logic" level="h2" />
+
+```sbpf
+jle r1, r2, end    // If current slot <= max slot, success
+lddw r0, 1         // Otherwise, set error code
+```
+
+핵심 타임아웃 로직은 단일 조건부 점프를 사용합니다:
+- 시간적 검증: `jle`(작거나 같으면 점프)는 현재 슬롯(`r1`)을 마감(`r2`)과 비교합니다. 시간 창 내에 있으면 `exit`로 점프합니다.
+- 타임아웃 처리: 마감이 지난 경우 실행이 계속되어 반환 레지스터 `r0`에 오류 코드 1을 로드(`lddw`)합니다.
+
+<ArticleSection name="결론" id="conclusion" level="h2" />
+
+이 압축된 프로그램은 최소한의 컴퓨팅 단위 소비로 시간적 검증을 수행합니다.
+
+이점은 시스템 호출 인터페이스, 스택 관리 및 `Clock` sysvar의 바이너리 레이아웃을 이해하는 것입니다. 그러나 성능이 중요한 시간적 검증의 경우 어셈블리는 비교할 수 없는 효율성을 제공합니다.

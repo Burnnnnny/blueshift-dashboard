@@ -1,0 +1,240 @@
+# 대출 (Loan)
+
+`loan` 명령어는 플래시 론 시스템의 전반부입니다. 안전하고 원자적(atomic)인 대출을 보장하기 위해 네 가지 중요한 단계를 수행합니다:
+1. 사용자가 받고자 하는 대출 수에 따라 동적인 수의 계정을 역직렬화합니다.
+2. 이 모든 대출을 `loan` "스크래치(scratch)" 계정에 저장하고 `protocol_token_account`가 가져야 할 최종 잔액을 계산합니다.
+3. 상환 확인: 명령어 인트로스펙션을 사용하여 트랜잭션 끝에 유효한 상환 명령어가 존재하는지 확인합니다.
+4. 자금 이체: 요청된 모든 대출 금액을 프로토콜의 금고에서 대출자의 계정으로 이동합니다.
+
+<ArticleSection name="필수 계정" id="required-accounts" level="h2" />
+
+- `borrower`: 플래시 론을 요청하는 사용자. 서명자(Signer)여야 함
+- `protocol`: 특정 수수료에 대한 프로토콜의 유동성 풀을 소유하는 프로그램 파생 주소(PDA).
+- `loan`: `protocol_token_account`와 가져야 할 최종 `balance`를 저장하는 데 사용되는 "스크래치" 계정. 가변(mutable)이어야 함
+- `token_program`: 토큰 프로그램. 실행 가능(executable)이어야 함
+
+구현은 다음과 같습니다:
+
+```rust
+pub struct LoanAccounts<'a> {
+    pub borrower: &'a AccountInfo,
+    pub protocol: &'a AccountInfo,
+    pub loan: &'a AccountInfo,
+    pub instruction_sysvar: &'a AccountInfo,
+    pub token_accounts: &'a [AccountInfo],
+}
+
+impl<'a> TryFrom<&'a [AccountInfo]> for LoanAccounts<'a> {
+    type Error = ProgramError;
+
+    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+        let [borrower, protocol, loan, instruction_sysvar, _token_program, _system_program, token_accounts @ ..] = accounts else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+
+        if !pubkey_eq(instruction_sysvar.key(), &INSTRUCTIONS_ID) {
+            return Err(ProgramError::UnsupportedSysvar);
+        }
+
+        // Verify that the number of token accounts is valid
+        if (token_accounts.len() % 2).ne(&0) || token_accounts.len().eq(&0) {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
+        if loan.try_borrow_data()?.len().ne(&0) {
+            return Err(ProgramError::InvalidAccountData);
+        }
+
+        Ok(Self {
+            borrower,
+            protocol,
+            loan,
+            instruction_sysvar,
+            token_accounts,
+        })
+    }
+}
+```
+
+`token_accounts`는 동적인 계정 배열이므로 `remaining_accounts`와 유사하게 전달합니다.
+
+구조가 올바른지 확인하기 위해 유효성 검사를 추가합니다. 각 대출에는 `protocol_token_account`와 `borrower_token_account`가 필요하므로 배열에 계정이 포함되어 있고 계정 수가 2로 나누어지는지 확인해야 합니다.
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+플래시 론 프로그램은 사용자가 동시에 받고자 하는 대출 수에 따라 가변적인 양의 데이터를 처리해야 합니다. 필요한 데이터 구조는 다음과 같습니다:
+- `bump`: `find_program_address()` 함수를 사용할 필요 없이 프로토콜 PDA를 파생하는 데 사용되는 단일 바이트.
+- `fee`: 사용자가 대출에 대해 지불하는 수수료율(베이시스 포인트)
+- `amounts`: 사용자가 한 번의 트랜잭션에서 여러 대출을 요청할 수 있으므로 대출 금액의 동적 배열
+
+구현은 다음과 같습니다:
+
+```rust
+pub struct LoanInstructionData<'a> {
+    pub bump: [u8; 1],
+    pub fee: u16,
+    pub amounts: &'a [u64],
+}
+
+impl<'a> TryFrom<&'a [u8]> for LoanInstructionData<'a> {
+    type Error = ProgramError;
+
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
+        // Get the bump
+        let (bump, data) = data.split_first().ok_or(ProgramError::InvalidInstructionData)?;
+
+        // Get the fee
+        let (fee, data) = data.split_at_checked(size_of::<u16>()).ok_or(ProgramError::InvalidInstructionData)?;
+
+        // Verify that the data is valid
+        if data.len() % size_of::<u64>() != 0 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        // Get the amounts
+        let amounts: &[u64] = unsafe {
+            core::slice::from_raw_parts(
+                data.as_ptr() as *const u64,
+                data.len() / size_of::<u64>()
+            )
+        };
+
+        Ok(Self { bump: [*bump], fee: u16::from_le_bytes(fee.try_into().map_err(|_| ProgramError::InvalidInstructionData)?), amounts })
+    }
+}
+```
+
+`split_first` 및 `split_at_checked` 함수를 사용하여 명령어 데이터에서 `bump`와 `fee`를 순차적으로 추출하고, 나머지 바이트를 처리하여 `core::slice::from_raw_parts()` 함수를 사용하여 효율적인 구문 분석을 위해 `u64` 슬라이스로 직접 캐스팅합니다.
+
+> `fee`를 사용하여 `protocol` 프로그램 파생 주소를 파생하면 각 수수료 계층에 대해 격리된 유동성 풀이 생성되므로 계정에 수수료 데이터를 저장할 필요가 없습니다. 이 설계는 특정 수수료가 있는 각 PDA가 해당 수수료율과 관련된 유동성만 소유하므로 안전하고 최적입니다. 누군가 유효하지 않은 수수료를 전달하면 해당 수수료 구간에 대한 해당 토큰 계정이 비어 있으므로 자금 부족으로 인해 전송이 자동으로 실패합니다.
+
+<ArticleSection name="명령어 로직" id="instruction-logic" level="h2" />
+
+`instruction_data`와 `accounts`를 역직렬화한 후 `amounts`의 수가 `token_accounts`의 수를 2로 나눈 값과 같은지 확인합니다. 이렇게 하면 요청된 대출에 대해 올바른 수의 계정이 있는지 확인할 수 있습니다.
+
+```rust
+pub struct Loan<'a> {
+    pub accounts: LoanAccounts<'a>,
+    pub instruction_data: LoanInstructionData<'a>,
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Loan<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let accounts = LoanAccounts::try_from(accounts)?;
+        let instruction_data = LoanInstructionData::try_from(data)?;
+
+        // Verify that the number of amounts matches the number of token accounts
+        if instruction_data.amounts.len() != accounts.token_accounts.len() / 2 {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        Ok(Self {
+            accounts,
+            instruction_data,
+        })
+    }
+}
+```
+
+다음으로 토큰을 대출자에게 전송하고 `loan` 계정을 생성하는 데 필요한 `signer_seeds`를 생성합니다. 이 계정의 크기는 `size_of::<LoanData>() * self.instruction_data.amounts.len()`을 사용하여 계산되어 트랜잭션의 모든 대출 데이터를 보관할 수 있는지 확인합니다.
+
+```rust
+impl<'a> Loan<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &0;
+
+    pub fn process(&mut self) -> ProgramResult {
+        // Get the fee
+        let fee = self.instruction_data.fee.to_le_bytes();
+
+        // Get the signer seeds
+        let signer_seeds = [
+            Seed::from("protocol".as_bytes()),
+            Seed::from(&fee),
+            Seed::from(&self.instruction_data.bump),
+        ];
+        let signer_seeds = [Signer::from(&signer_seeds)];
+
+        // Open the LoanData account and create a mutable slice to push the Loan struct to it
+        let size = size_of::<LoanData>() * self.instruction_data.amounts.len();
+        let lamports = Rent::get()?.minimum_balance(size);
+
+        CreateAccount {
+            from: self.accounts.borrower,
+            to: self.accounts.loan,
+            lamports,
+            space: size as u64,
+            owner: &ID,
+        }.invoke()?;
+
+        //..
+    }
+}
+```
+
+그런 다음 `loan` 계정의 데이터에서 가변 슬라이스를 만듭니다. 각 대출과 해당 전송을 처리할 때 `for` 루프에서 이 슬라이스를 채웁니다:
+
+```rust
+let mut loan_data = self.accounts.loan.try_borrow_mut_data()?;
+let loan_entries = unsafe {
+    core::slice::from_raw_parts_mut(
+        loan_data.as_mut_ptr() as *mut LoanData,
+        self.instruction_data.amounts.len()
+    )
+};
+```
+
+마지막으로 모든 대출을 반복합니다. 각 반복에서 `protocol_token_account`와 `borrower_token_account`를 가져오고 프로토콜에 지불해야 할 잔액을 계산하고 이 데이터를 `loan` 계정에 저장하고 토큰을 전송합니다.
+
+```rust
+for (i, amount) in self.instruction_data.amounts.iter().enumerate() {
+    let protocol_token_account = &self.accounts.token_accounts[i * 2];
+    let borrower_token_account = &self.accounts.token_accounts[i * 2 + 1];
+
+    // Get the balance of the protocol's token account and add the fee to it so we can save it to the loan account
+    let balance = get_token_amount(&protocol_token_account.try_borrow_data()?)?;
+    let balance_with_fee = balance.checked_add(
+        amount.checked_mul(self.instruction_data.fee as u64)
+            .and_then(|x| x.checked_div(10_000))
+            .ok_or(ProgramError::InvalidInstructionData)?
+    ).ok_or(ProgramError::InvalidInstructionData)?;
+
+    // Push the Loan struct to the loan account
+    loan_entries[i] = LoanData {
+        protocol_token_account: *protocol_token_account.key(),
+        balance: balance_with_fee,
+    };
+
+    // Transfer the tokens from the protocol to the borrower
+    Transfer {
+        from: protocol_token_account,
+        to: borrower_token_account,
+        authority: self.accounts.protocol,
+        amount: *amount,
+    }.invoke_signed(&signer_seeds)?;
+}
+```
+
+명령어 인트로스펙션을 사용하여 필요한 검사를 수행하는 것으로 마무리합니다. 트랜잭션의 마지막 명령어가 `repay` 명령어이고 현재 `loan` 명령어와 동일한 `loan` 계정을 사용하는지 확인합니다.
+
+```rust
+// Introspecting the Repay instruction
+let instruction_sysvar = unsafe { Instructions::new_unchecked(self.accounts.instruction_sysvar.try_borrow_data()?) };
+let num_instructions = instruction_sysvar.num_instructions();
+let instruction = instruction_sysvar.load_instruction_at(num_instructions as usize - 1)?;
+
+if instruction.get_program_id() != &crate::ID {
+    return Err(ProgramError::InvalidInstructionData);
+}
+
+if unsafe { *(instruction.get_instruction_data().as_ptr()) } != *Repay::DISCRIMINATOR {
+    return Err(ProgramError::InvalidInstructionData);
+}
+
+if unsafe { instruction.get_account_meta_at_unchecked(1).key } != *self.accounts.loan.key() {
+    return Err(ProgramError::InvalidInstructionData);
+}
+```
+
+> `loan` 계정을 사용하고 명령어 인트로스펙션을 이런 식으로 구조화하면 모든 상환 확인이 `loan` 계정을 통해 처리되므로 실제로 `repay` 명령어에서 인트로스펙션을 수행할 필요가 없습니다.

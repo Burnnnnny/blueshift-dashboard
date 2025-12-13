@@ -1,0 +1,30 @@
+import { ChallengeTitle } from "../../../../components/Challenges/ChallengeTitle";
+import { RequirementList } from "../../../../components/Challenges/RequirementList";
+import { Requirement } from "../../../../components/Challenges/Requirement";
+
+<ChallengeTitle>sBPF 어셈블리 메모 (sBPF Assembly Memo)</ChallengeTitle>
+
+하나의 명령어만 있는 프로그램을 만드세요. 다음을 수행해야 합니다:
+- 명령어 데이터에 계정이 포함된 경우 실패해야 합니다(계정 수로 `r0`를 설정하여 수행할 수 있음).
+- `r2`를 명령어 데이터의 길이로 설정하고 `r1`을 명령어 데이터의 오프셋으로 설정합니다.
+- `sol_log_` 시스템 호출을 호출합니다.
+
+[어셈블리 소개 과정의 도구 섹션](/ko/courses/introduction-to-assembly/tooling)에 설명된 대로 sBPF 패키지를 설치하는 것으로 시작하고 터미널에서 다음 명령을 사용하여 프로그램을 빌드하세요:
+
+```
+sbpf build
+```
+
+그러면 `target/deploy` 폴더에 `.so` 파일이 생성됩니다.
+
+이제 `take challenge` 버튼을 클릭하고 거기에 파일을 놓으세요!
+
+<RequirementList>
+  <Requirement title="도전 과제 1: 메모 테스트">
+    프로그램이 성공하고 `Hello, Solana!`를 기록해야 합니다.
+  </Requirement>
+
+  <Requirement title="도전 과제 2: 다른 입력으로 메모 테스트">
+    `Hello, Solana!` 문자열을 하드 코딩하지 않았는지 확인하기 위해 다른 입력(`Hello, Solana, but different!`)으로 다시 시도합니다.
+  </Requirement>
+</RequirementList>

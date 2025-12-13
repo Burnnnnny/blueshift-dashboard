@@ -1,0 +1,132 @@
+# 금고 닫기 (Close Vault)
+
+`close` 명령어는 양자 내성 금고에서 완전한 인출을 수행하여 모든 lamports를 단일 수신자 계정으로 전송합니다.
+
+`split` 명령어와 달리 자금 분배가 필요하지 않을 때 더 간단한 전체 인출 메커니즘을 제공합니다.
+
+<ArticleSection name="필수 계정" id="required-accounts" level="h2" />
+
+명령어에는 세 개의 계정이 필요합니다:
+
+- `vault`: 저장된 lamports를 포함하는 소스 금고(가변이어야 함)
+- `refund`: 금고 lamports 잔액을 받을 수신자 계정(가변이어야 함)
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct CloseVaultAccounts<'a> {
+    pub vault: &'a AccountInfo,
+    pub refund: &'a AccountInfo,
+}
+
+impl<'a> TryFrom<&'a [AccountInfo]> for CloseVaultAccounts<'a> {
+    type Error = ProgramError;
+
+    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+        let [vault, refund] = accounts else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+
+        Ok(Self { vault, refund })
+    }
+}
+
+```
+
+> 계정 검증은 런타임에 의해 처리됩니다. 계정이 요구 사항(가변성)을 충족하지 않으면 명령어가 자동으로 실패합니다.
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+두 가지 데이터가 필요합니다:
+- `signature`: 금고의 키 쌍 소유권을 증명하는 Winternitz 서명
+- `bump`: 최적화를 위한 PDA 파생 범프(1바이트)
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct CloseVaultInstructionData {
+    pub signature: WinternitzSignature,
+    pub bump: [u8; 1],
+}
+
+impl<'a> TryFrom<&'a [u8]> for CloseVaultInstructionData {
+    type Error = ProgramError;
+
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
+        if data.len() != core::mem::size_of::<CloseVaultInstructionData>() {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let mut signature_array = MaybeUninit::<[u8; 896]>::uninit();
+        unsafe {
+            core::ptr::copy_nonoverlapping(data[0..896].as_ptr(), signature_array.as_mut_ptr() as *mut u8, 896);
+        }
+        
+        Ok(Self { 
+            signature: WinternitzSignature::from(unsafe { signature_array.assume_init() }),
+            bump: data[896..897].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
+        })
+    }
+}
+```
+
+<ArticleSection name="명령어 로직" id="instruction-logic" level="h2" />
+
+검증 프로세스는 다음 단계를 따릅니다:
+
+1. 메시지 조립: `refund` 계정 공개 키를 포함하는 32바이트 메시지가 생성됩니다.
+
+2. 서명 검증: Winternitz 서명을 사용하여 원래 공개 키 해시를 복구한 다음 금고의 PDA 파생 시드와 비교합니다.
+
+3. PDA 유효성 검사: 빠른 동등성 검사를 통해 복구된 해시가 금고의 PDA와 일치하는지 확인하여 서명자가 금고를 소유하고 있음을 증명합니다.
+
+4. 자금 분배: 검증에 성공하면 전체 잔액이 `refund` 계정으로 전송되고 `vault` 계정이 닫힙니다.
+
+> 프로그램이 `vault` 계정을 소유하고 있으므로 CPI(프로그램 간 호출)를 호출하지 않고도 lamports를 직접 전송할 수 있습니다.
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct CloseVault<'a> {
+    pub accounts: CloseVaultAccounts<'a>,
+    pub instruction_data: CloseVaultInstructionData,
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for CloseVault<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let instruction_data = CloseVaultInstructionData::try_from(data)?;
+        let accounts = CloseVaultAccounts::try_from(accounts)?;
+
+        Ok(Self { accounts, instruction_data })
+    }
+}
+
+impl<'a> CloseVault<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &2;
+ 
+    pub fn process(&self) -> ProgramResult {
+        // Recover our pubkey hash from the signature
+        let hash = self.instruction_data.signature.recover_pubkey(self.accounts.refund.key()).merklize();
+
+        // Fast PDA equivalence check
+        if solana_nostd_sha256::hashv(&[
+            hash.as_ref(),
+            self.instruction_data.bump.as_ref(),
+            crate::ID.as_ref(),
+            b"ProgramDerivedAddress",
+        ])
+        .ne(self.accounts.vault.key())
+        {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+
+        // Close Vault and refund balance to Refund account
+        *self.accounts.refund.try_borrow_mut_lamports()? += self.accounts.vault.lamports();
+        self.accounts.vault.close()
+    }
+}
+```
+
+> 메시지를 재구성하면 악의적인 행위자가 mempool에서 캡처한 유효한 서명을 MEV(Miner Extractable Value) 공격으로 사용하여 다른 수신자 계정을 대체하는 서명 재생 공격(signature replay attacks)을 방지할 수 있습니다.

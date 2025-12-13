@@ -1,0 +1,168 @@
+# 스왑 (Swap)
+
+`swap` 명령어는 두 가지 주요 작업을 수행합니다:
+- 수수료를 포함하여 amm에 일정량의 `mint_y`를 보내(그 반대의 경우도 마찬가지) 받을 `mint_x`의 양을 계산합니다.
+- `from` 토큰을 보관소로, `to` 토큰을 사용자 토큰 계정으로 전송합니다.
+
+> `initialize` 명령어 섹션에서 언급했듯이 최적화를 위해 명령어 외부에서 모든 `Associated Token Accounts`를 초기화할 것입니다.
+
+<ArticleSection name="필수 계정" id="required-accounts" level="h2" />
+
+이 컨텍스트에 필요한 계정은 다음과 같습니다:
+- `user`: Amm의 유동성으로 토큰을 스왑하는 사용자입니다. `signer`이어야 합니다.
+- `user_x_ata`: 토큰 X에 대한 사용자의 연결된 토큰 계정입니다. 풀로 토큰 X를 받거나 보내는 계정입니다. `mutable`로 전달되어야 합니다.
+- `user_y_ata`: 토큰 Y에 대한 사용자의 연결된 토큰 계정입니다. 풀로 토큰 Y를 받거나 보내는 계정입니다. `mutable`로 전달되어야 합니다.
+- `vault_x`: 풀에 예치된 모든 토큰 X를 보유하는 토큰 계정입니다. `mutable`로 전달되어야 합니다.
+- `vault_y`: 풀에 예치된 모든 토큰 Y를 보유하는 토큰 계정입니다. `mutable`로 전달되어야 합니다.
+- `config`: AMM 풀의 구성 계정입니다. 모든 관련 풀 매개변수와 상태를 저장합니다.
+- `token program`: SPL Token 프로그램 계정입니다. 전송 및 발행과 같은 토큰 작업을 수행하는 데 필요합니다. `executable`이어야 합니다.
+
+여기서도 구현은 여러분에게 맡기겠습니다:
+
+```rust
+pub struct SwapAccounts<'a> {
+    pub user: &'a AccountInfo,
+    pub user_x_ata: &'a AccountInfo,
+    pub user_y_ata: &'a AccountInfo,
+    pub vault_x: &'a AccountInfo,
+    pub vault_y: &'a AccountInfo,
+    pub config: &'a AccountInfo,
+    pub token_program: &'a AccountInfo,
+}
+
+impl<'a> TryFrom<&'a [AccountInfo]> for SwapAccounts<'a> {
+    type Error = ProgramError;
+
+    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+        //..
+    }
+}
+```
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+전달해야 할 명령어 데이터는 다음과 같습니다:
+- `is_x`: 이 스왑이 토큰 X에서 토큰 Y로 수행되는지 또는 그 반대로 수행되는지 여부; 계정을 올바르게 정렬하는 데 필요합니다. `[u8]`이어야 합니다.
+- `amount`: 사용자가 쌍의 다른 토큰과 교환하여 보내려는 토큰의 양. `[u64]`여야 합니다.
+- `min`: `amount`의 교환으로 사용자가 받으려는 토큰의 최소 양. `[u64]`여야 합니다.
+- `expiration`: 이 주문의 만료. 트랜잭션이 일정 시간 내에 실행되도록 하는 데 중요합니다. `[i64]`여야 합니다.
+
+초기화와 동일하게 `SwapInstructionData`에 대한 구현을 처리할 것입니다. 따라서 구현은 여러분에게 맡기겠습니다:
+
+```rust
+pub struct SwapInstructionData {
+    pub is_x: bool,
+    pub amount: u64,
+    pub min: u64,
+    pub expiration: i64,
+}
+
+impl<'a> TryFrom<&'a [u8]> for SwapInstructionData {
+    type Error = ProgramError;
+
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
+        //..
+    }
+}
+```
+
+> `amount` 및 `min`과 같은 금액이 0보다 크고 `Clock` sysvar를 사용하여 주문이 아직 만료되지 않았는지 확인하세요.
+
+<ArticleSection name="명령어 로직" id="instruction-logic" level="h2" />
+
+`instruction_data`와 `accounts`를 모두 역직렬화하는 것으로 시작합니다.
+
+그런 다음 다음을 수행해야 합니다:
+- `Config` 계정을 로드하여 그 안의 모든 데이터를 가져옵니다. `Config::load()` 도우미를 사용하여 수행할 수 있습니다.
+- `AmmState`가 유효한지 확인합니다(`AmmState::Initialized`와 같은지).
+- `vault_x`와 `vault_y`의 파생이 연결된 토큰 계정인지 확인합니다.
+- 관련된 모든 토큰 계정을 역직렬화하고 그 안의 데이터를 사용하여 `constant-product-curve` 크레이트를 사용하여 스왑할 금액을 계산하고 다음과 같이 슬리피지를 확인합니다:
+```rust
+// Deserialize the token accounts
+let vault_x = unsafe { TokenAccount::from_account_info_unchecked(self.accounts.vault_x)? };
+let vault_y = unsafe { TokenAccount::from_account_info_unchecked(self.accounts.vault_y)? };
+
+// Swap Calculations
+let mut curve = ConstantProduct::init(
+    vault_x.amount(),
+    vault_y.amount(),
+    vault_x.amount(),
+    config.fee(),
+    None,
+)
+.map_err(|_| ProgramError::Custom(1))?;
+
+let p = match self.instruction_data.is_x {
+    true => LiquidityPair::X,
+    false => LiquidityPair::Y,
+};
+
+let swap_result = curve
+    .swap(p, self.instruction_data.amount, self.instruction_data.min)
+    .map_err(|_| ProgramError::Custom(1))?;
+
+// Check for correct values
+if swap_result.deposit == 0 || swap_result.withdraw == 0 {
+    return Err(ProgramError::InvalidArgument);
+}
+```
+
+- 다음과 같이 `is_x` 값을 확인하고 `from` 금액을 보관소로, `to` 금액을 사용자 토큰 계정으로 전송하는 전송 로직을 만듭니다:
+
+```rust
+if self.instruction_data.is_x {
+    Transfer {
+        //...
+    }
+    .invoke()?;
+
+    Transfer {
+        //...
+    }
+    .invoke_signed(&signer_seeds)?;
+} else {
+    Transfer {
+        //...
+
+    }
+    .invoke()?;
+
+    Transfer {
+        //...
+    }
+    .invoke_signed(&signer_seeds)?;
+}
+```
+
+이 작업을 스스로 수행할 수 있을 만큼 능숙해야 하므로 구현은 여러분에게 맡기겠습니다:
+
+```rust
+pub struct Swap<'a> {
+    pub accounts: SwapAccounts<'a>,
+    pub instruction_data: SwapInstructionData,
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Swap<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let accounts = SwapAccounts::try_from(accounts)?;
+        let instruction_data = SwapInstructionData::try_from(data)?;
+
+        // Return the initialized struct
+        Ok(Self {
+            accounts,
+            instruction_data,
+        })
+    }
+}
+impl<'a> Swap<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &3;
+
+    pub fn process(&mut self) -> ProgramResult {
+        //..
+
+        Ok(())
+    }
+}
+```

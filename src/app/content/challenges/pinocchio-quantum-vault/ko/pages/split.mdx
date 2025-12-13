@@ -1,0 +1,148 @@
+# 금고 분할 (Split Vault)
+
+`split` 명령어는 lamports를 여러 계정에 분배하여 양자 내성 금고에서 부분 인출을 가능하게 합니다. 이는 한 번만 안전하게 사용할 수 있는 Winternitz 서명 체계에 필수적입니다.
+
+기존 암호화와 달리 Winternitz 서명은 한 번 사용하면 취약해집니다. split 명령어를 사용하면 다음을 수행할 수 있습니다:
+- 한 번의 트랜잭션으로 여러 수신자에게 지불금을 분배
+- 남은 자금을 새로운 키 쌍이 있는 새로운 양자 금고로 이월(`refund` 계정으로 양자 금고를 전달하여)
+
+<ArticleSection name="필수 계정" id="required-accounts" level="h2" />
+
+명령어에는 세 개의 계정이 필요합니다:
+
+- `vault`: 저장된 lamports를 포함하는 소스 금고(가변이어야 함)
+- `split`: 지정된 금액을 받을 수신자 계정(가변이어야 함)
+- `refund`: 남은 금고 잔액을 받을 수신자 계정(가변이어야 함)
+
+`refund` 계정은 종종 새로운 Winternitz 키 쌍이 있는 새로운 양자 금고로, 남은 자금에 대한 지속적인 보안을 보장합니다.
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct SplitVaultAccounts<'a> {
+    pub vault: &'a AccountInfo,
+    pub split: &'a AccountInfo,
+    pub refund: &'a AccountInfo,
+}
+
+impl<'a> TryFrom<&'a [AccountInfo]> for SplitVaultAccounts<'a> {
+    type Error = ProgramError;
+
+    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+        let [vault, split, refund] = accounts else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+
+        Ok(Self { vault, split, refund })
+    }
+}
+```
+
+> 계정 검증은 런타임에 의해 처리됩니다. 계정이 요구 사항(가변성)을 충족하지 않으면 명령어가 자동으로 실패합니다.
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+세 가지 데이터가 필요합니다:
+- `signature`: 금고의 키 쌍 소유권을 증명하는 Winternitz 서명
+- `amount`: split 계정으로 전송할 Lamports(8바이트, 리틀 엔디안)
+- `bump`: 최적화를 위한 PDA 파생 범프(1바이트)
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct SplitVaultInstructionData {
+    pub signature: WinternitzSignature,
+    pub amount: [u8; 8],
+    pub bump: [u8; 1],
+}
+
+impl<'a> TryFrom<&'a [u8]> for SplitVaultInstructionData {
+    type Error = ProgramError;
+
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
+        if data.len() != core::mem::size_of::<SplitVaultInstructionData>() {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let mut signature_array = MaybeUninit::<[u8; 896]>::uninit();
+        unsafe {
+            core::ptr::copy_nonoverlapping(data[0..896].as_ptr(), signature_array.as_mut_ptr() as *mut u8, 896);
+        }
+        
+        Ok(Self { 
+            signature: WinternitzSignature::from(unsafe { signature_array.assume_init() }),
+            bump: data[896..897].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
+            amount: data[897..905].try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
+        })
+    }
+}
+```
+
+<ArticleSection name="명령어 로직" id="instruction-logic" level="h2" />
+
+검증 프로세스는 다음 단계를 따릅니다:
+
+1. 메시지 조립: 분할할 금액, `split` 계정 공개 키, `refund` 계정 공개 키를 포함하는 72바이트 메시지가 생성됩니다.
+
+2. 서명 검증: Winternitz 서명을 사용하여 원래 공개 키 해시를 복구한 다음 금고의 PDA 파생 시드와 비교합니다.
+
+3. PDA 유효성 검사: 빠른 동등성 검사를 통해 복구된 해시가 금고의 PDA와 일치하는지 확인하여 서명자가 금고를 소유하고 있음을 증명합니다.
+
+4. 자금 분배: 검증에 성공하면 지정된 금액이 `split` 계정으로 전송되고, 남은 잔액은 `refund` 계정으로 전송되며 `vault` 계정은 닫힙니다.
+
+> 프로그램이 `vault` 계정을 소유하고 있으므로 CPI(프로그램 간 호출)를 호출하지 않고도 lamports를 직접 전송할 수 있습니다.
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct SplitVault<'a> {
+    pub accounts: SplitVaultAccounts<'a>,
+    pub instruction_data: SplitVaultInstructionData,
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for SplitVault<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let instruction_data = SplitVaultInstructionData::try_from(data)?;
+        let accounts = SplitVaultAccounts::try_from(accounts)?;
+
+        Ok(Self { accounts, instruction_data })
+    }
+}
+
+impl<'a> SplitVault<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &1;
+
+    pub fn process(&self) -> ProgramResult {
+        // Assemble our Split message
+        let mut message = [0u8; 72];
+        message[0..8].clone_from_slice(&self.instruction_data.amount);
+        message[8..40].clone_from_slice(self.accounts.split.key());
+        message[40..].clone_from_slice(self.accounts.refund.key());
+
+        // Recover our pubkey hash from the signature
+        let hash = self.instruction_data.signature.recover_pubkey(&message).merklize();
+
+        // Fast PDA equivalence check
+        if solana_nostd_sha256::hashv(&[
+            hash.as_ref(),
+            self.instruction_data.bump.as_ref(),
+            crate::ID.as_ref(),
+            b"ProgramDerivedAddress",
+        ])
+        .ne(self.accounts.vault.key())
+        {
+            return Err(ProgramError::MissingRequiredSignature);
+        }
+
+        // Close Vault, send split balance to Split account, refund remainder to Refund account
+        *self.accounts.split.try_borrow_mut_lamports()? += u64::from_le_bytes(self.instruction_data.amount);
+        *self.accounts.refund.try_borrow_mut_lamports()? += self.accounts.vault.lamports().saturating_sub(u64::from_le_bytes(self.instruction_data.amount));
+
+        self.accounts.vault.close()
+    }
+}
+```
+
+> 메시지를 재구성하면 악의적인 행위자가 mempool에서 캡처한 유효한 서명을 MEV 공격으로 사용하여 다른 수신자 계정을 대체하는 서명 재생 공격을 방지할 수 있습니다.

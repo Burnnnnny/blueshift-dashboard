@@ -1,0 +1,172 @@
+# 초기화 (Initialize)
+
+`initialize` 명령어는 두 가지 주요 작업을 수행합니다:
+- `Config` 계정을 초기화하고 amm이 올바르게 작동하는 데 필요한 모든 정보를 저장합니다.
+- `mint_lp` Mint 계정을 생성하고 `mint_authority`를 `config` 계정에 할당합니다.
+
+> 여기서는 연결된 토큰 계정(ATA)을 초기화하지 않습니다. 불필요하고 낭비일 수 있기 때문입니다. 후속 `deposit`, `withdraw`, `swap` 명령어에서 토큰이 올바른 ATA에 예치되었는지 확인합니다. 그러나 요청 시 이러한 계정을 생성하려면 프런트엔드에 "initializeAccount" 도우미를 만들어야 합니다.
+
+<ArticleSection name="필수 계정" id="required-accounts" level="h2" />
+
+이 컨텍스트에 필요한 계정은 다음과 같습니다:
+- `initializer`: `config` 계정의 생성자입니다. 반드시 권한을 가질 필요는 없습니다. `config`와 `mint_lp`의 초기화 비용을 모두 지불하므로 `signer` 및 `mutable`이어야 합니다.
+- `mint_lp`: 풀의 유동성을 나타내는 Mint 계정입니다. `mint_authority`는 `config` 계정으로 설정되어야 합니다. `mutable`로 전달되어야 합니다.
+- `config`: 초기화되는 구성 계정입니다. `mutable`이어야 합니다.
+- `system` 및 `token` 프로그램: 위 계정을 초기화하는 데 필요한 프로그램 계정입니다. `executable`이어야 합니다.
+
+> 경험이 쌓이면 이러한 검사 중 많은 부분을 생략하고 대신 CPI 자체에서 시행하는 제약 조건에 의존할 수 있음을 알게 될 것입니다. 예를 들어, 이 계정 구조체의 경우 명시적인 검사가 필요하지 않습니다. 제약 조건이 충족되지 않으면 프로그램은 기본적으로 실패합니다. 로직을 진행하면서 이러한 뉘앙스를 지적하겠습니다.
+
+우리가 만드는 일반적인 구조체와 변경 사항이 많지 않으므로 구현은 여러분에게 맡기겠습니다:
+
+```rust
+pub struct InitializeAccounts<'a> {
+    pub initializer: &'a AccountInfo,
+    pub mint_lp: &'a AccountInfo,
+    pub config: &'a AccountInfo,
+}
+
+impl<'a> TryFrom<&'a [AccountInfo]> for InitializeAccounts<'a> {
+  type Error = ProgramError;
+
+  fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+    //..
+  }
+}
+```
+
+> 위에서 논의한 모든 계정을 전달해야 하지만, 구현에서 모든 계정을 직접 참조할 필요는 없으므로 `InitializeAccounts` 구조체에 모두 포함시킬 필요는 없습니다.
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+전달해야 할 명령어 데이터는 다음과 같습니다:
+- `seed`: PDA(프로그램 파생 주소) 시드 파생에 사용되는 임의의 숫자입니다. 이를 통해 고유한 풀 인스턴스를 만들 수 있습니다. `[u64]`여야 합니다.
+- `fee`: 베이시스 포인트(1 베이시스 포인트 = 0.01%)로 표시되는 스왑 수수료입니다. 이 수수료는 각 거래에서 징수되어 유동성 공급자에게 분배됩니다. `[u16]`이어야 합니다.
+- `mint_x`: 풀의 토큰 X에 대한 SPL 토큰 민트 주소입니다. `[u8; 32]`여야 합니다.
+- `mint_y`: 풀의 토큰 Y에 대한 SPL 토큰 민트 주소입니다. `[u8; 32]`여야 합니다.
+- `config_bump`: `config` 계정 PDA를 파생하는 데 사용되는 범프 시드입니다. `u8`이어야 합니다.
+- `lp_bump`: `lp_mint` 계정 PDA를 파생하는 데 사용되는 범프 시드입니다. `u8`이어야 합니다.
+- `authority`: AMM에 대한 관리 권한을 갖는 공개 키입니다. 제공되지 않으면 풀을 불변으로 설정할 수 있습니다. `[u8; 32]`여야 합니다.
+
+> 보시다시피 이러한 필드 중 일부는 다르게 파생될 수 있습니다. 예를 들어 `Mint` 계정을 전달하고 거기에서 직접 읽어 `mint_x`를 얻거나 프로그램 자체 내에서 `bump` 값을 생성할 수 있습니다. 그러나 명시적으로 전달함으로써 가장 최적화되고 효율적인 프로그램을 만드는 것을 목표로 합니다.
+
+이 구현에서는 평소보다 더 유연하고 낮은 수준의 방식으로 명령어 데이터 구문 분석을 처리합니다. 이러한 결정을 내리는 이유는 다음과 같습니다:
+
+```rust
+#[repr(C, packed)]
+pub struct InitializeInstructionData {
+    pub seed: u64,
+    pub fee: u16,
+    pub mint_x: [u8; 32],
+    pub mint_y: [u8; 32],
+    pub config_bump: [u8; 1],
+    pub lp_bump: [u8; 1],
+    pub authority: [u8; 32],
+}
+
+impl TryFrom<&[u8]> for InitializeInstructionData {
+    type Error = ProgramError;
+
+    fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
+        const INITIALIZE_DATA_LEN_WITH_AUTHORITY: usize = size_of::<InitializeInstructionData>();
+        const INITIALIZE_DATA_LEN: usize =
+            INITIALIZE_DATA_LEN_WITH_AUTHORITY - size_of::<[u8; 32]>();
+
+        match data.len() {
+            INITIALIZE_DATA_LEN_WITH_AUTHORITY => {
+                Ok(unsafe { (data.as_ptr() as *const Self).read_unaligned() })
+            }
+            INITIALIZE_DATA_LEN => {
+                // If the authority is not present, we need to build the buffer and add it at the end before transmuting to the struct
+                let mut raw: MaybeUninit<[u8; INITIALIZE_DATA_LEN_WITH_AUTHORITY]> = MaybeUninit::uninit();
+                let raw_ptr = raw.as_mut_ptr() as *mut u8;
+                unsafe {
+                    // Copy the provided data
+                    core::ptr::copy_nonoverlapping(data.as_ptr(), raw_ptr, INITIALIZE_DATA_LEN);
+                    // Add the authority to the end of the buffer
+                    core::ptr::write_bytes(raw_ptr.add(INITIALIZE_DATA_LEN), 0, 32);
+                    // Now transmute to the struct
+                    Ok((raw.as_ptr() as *const Self).read_unaligned())
+                }
+            }
+            _ => Err(ProgramError::InvalidInstructionData),
+        }
+    }
+}
+```
+
+`InitializeInstructionData`의 권한 필드는 선택 사항이며 불변 풀을 만들기 위해 생략할 수 있습니다.
+
+이를 용이하게 하고 불변 풀을 생성할 때 32바이트의 트랜잭션 데이터를 절약하기 위해 명령어 데이터 길이를 확인하고 그에 따라 데이터를 구문 분석합니다. 데이터가 더 짧으면 버퍼 끝에 32개의 0 바이트를 써서 권한 필드를 `None`으로 설정합니다. 전체 `authority` 필드가 포함되어 있으면 바이트 슬라이스를 구조체로 직접 캐스팅합니다.
+
+<ArticleSection name="명령어 로직" id="instruction-logic" level="h2" />
+
+`instruction_data`와 `accounts`를 모두 역직렬화하는 것으로 시작합니다.
+
+그런 다음 다음을 수행해야 합니다:
+- 시스템 프로그램의 `CreateAccount` 명령어와 다음 시드를 사용하여 `Config` 계정을 만듭니다:
+```rust
+let seed_binding = self.instruction_data.seed.to_le_bytes();
+let config_seeds = [
+    Seed::from(b"config"),
+    Seed::from(&seed_binding),
+    Seed::from(&self.instruction_data.mint_x),
+    Seed::from(&self.instruction_data.mint_y),
+    Seed::from(&self.instruction_data.config_bump),
+];
+```
+- `Config::load_mut_unchecked()` 도우미를 사용하여 로드하고 `config.set_inner()` 도우미를 사용하여 필요한 모든 데이터를 채워 `Config` 계정을 채웁니다.
+- `CreateAccount` 및 `InitializeMint2` 명령어와 다음 시드를 사용하여 lp에 대한 `Mint` 계정을 만듭니다:
+```rust
+let mint_lp_seeds = [
+    Seed::from(b"mint_lp"),
+    Seed::from(self.accounts.config.key()),
+    Seed::from(&self.instruction_data.lp_bump),
+];
+```
+
+> `mint_lp`의 `mint_authority`는 `config` 계정입니다.
+
+이 작업을 스스로 수행할 수 있을 만큼 능숙해야 하므로 구현은 여러분에게 맡기겠습니다:
+
+```rust
+pub struct Initialize<'a> {
+    pub accounts: InitializeAccounts<'a>,
+    pub instruction_data: InitializeInstructionData,
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for Initialize<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let accounts = InitializeAccounts::try_from(accounts)?;
+        let instruction_data: InitializeInstructionData = InitializeInstructionData::try_from(data)?;
+
+        Ok(Self {
+            accounts,
+            instruction_data,
+        })
+    }
+}
+
+impl<'a> Initialize<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &0;
+
+    pub fn process(&mut self) -> ProgramResult {
+      //..
+
+      Ok(())
+    }
+}
+```
+
+<ArticleSection name="보안" id="security" level="h2" />
+
+앞서 언급했듯이 이례적으로 보일 수 있지만 전달되는 계정에 대해 명시적인 확인을 수행할 필요는 없습니다.
+
+이는 실제로 무언가 잘못되면 CPI(프로그램 간 호출) 중이나 프로그램에 넣은 검사를 통해 초기에 명령어가 실패하기 때문입니다.
+
+예를 들어 `initializer` 계정을 고려해 보겠습니다. 우리는 이것이 `signer`이자 `mutable`일 것으로 예상하지만, 그렇지 않다면 `payer`에 대해 해당 속성을 요구하므로 `CreateAccount` 명령어가 자동으로 실패합니다.
+
+마찬가지로 `config` 계정이 유효하지 않은 `mint_x` 또는 `mint_y`와 함께 전달되면 프로토콜에 예치하려는 모든 시도는 토큰 전송 중에 실패합니다.
+
+경험이 쌓이면 시스템 및 다운스트림 명령어에 의존하여 제약 조건을 시행함으로써 명령어를 가볍고 최적화된 상태로 유지하기 위해 많은 검사를 생략할 수 있음을 알게 될 것입니다.

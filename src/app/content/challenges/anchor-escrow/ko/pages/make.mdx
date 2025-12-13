@@ -1,0 +1,147 @@
+import { ArticleSection } from "../../../../../components/ArticleSection/ArticleSection";
+
+<ArticleSection name="Make" id="make" level="h2" />
+
+이제 `make.rs`에 있으며 다음 작업을 수행할 `make` 명령어로 이동할 수 있습니다:
+- 에스크로 기록을 초기화하고 모든 조건을 저장합니다.
+- 금고(`escrow` 소유의 `mint_a`에 대한 ATA)를 생성합니다.
+- SPL-Token 프로그램에 대한 CPI를 통해 메이커의 Token A를 해당 금고로 이동합니다.
+
+### 계정 (Accounts)
+
+이 컨텍스트에 필요한 계정은 다음과 같습니다:
+- `maker`: 조건을 결정하고 `Escrow`에 `mint_a`를 예치하는 사용자
+- `escrow`: 교환 조건(메이커, 민트, 금액)을 보유한 계정
+- `mint_a`: `maker`가 예치하는 토큰
+- `mint_b`: `maker`가 교환으로 원하는 토큰
+- `maker_ata_a`: `vault`에 토큰을 예치하는 데 사용되는 `maker` 및 `mint_a`와 연결된 토큰 계정
+- `vault`: 예치된 토큰이 주차되는 `escrow` 및 `mint_a`와 연결된 토큰 계정
+- `associated_token_program`: 연결된 토큰 계정을 생성하는 데 사용되는 연결된 토큰 프로그램
+- `token_program`: 전송을 CPI하는 데 사용되는 토큰 프로그램
+- `system_program`: `Escrow`를 생성하는 데 사용되는 시스템 프로그램
+
+그리고 모든 제약 조건을 사용하면 다음과 비슷해질 것입니다:
+
+```rust
+#[derive(Accounts)]
+#[instruction(seed: u64)]
+pub struct Make<'info> {
+    #[account(mut)]
+    pub maker: Signer<'info>,
+    #[account(
+        init,
+        payer = maker,
+        space = Escrow::INIT_SPACE + Escrow::DISCRIMINATOR.len(),
+        seeds = [b"escrow", maker.key().as_ref(), seed.to_le_bytes().as_ref()],
+        bump,
+    )]
+    pub escrow: Account<'info, Escrow>,
+
+    /// Token Accounts
+    #[account(
+        mint::token_program = token_program
+    )]
+    pub mint_a: InterfaceAccount<'info, Mint>,
+    #[account(
+        mint::token_program = token_program
+    )]
+    pub mint_b: InterfaceAccount<'info, Mint>,
+    #[account(
+        mut,
+        associated_token::mint = mint_a,
+        associated_token::authority = maker,
+        associated_token::token_program = token_program
+    )]
+    pub maker_ata_a: InterfaceAccount<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = maker,
+        associated_token::mint = mint_a,
+        associated_token::authority = escrow,
+        associated_token::token_program = token_program
+    )]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
+
+    /// Programs
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+```
+
+**참고**: 이 명령어는 단일 token_program을 전달합니다. take는 두 민트 모두에 대해 전송하므로 두 민트가 모두 동일한 프로그램(SPL Token 또는 Token-2022) 소유인지 확인해야 합니다. 그렇지 않으면 CPI가 실패합니다.
+
+### 로직 (Logic)
+
+계정을 초기화한 후에는 계정 구조체의 구현으로 더 작은 헬퍼 함수를 생성하여 로직을 처리할 수 있습니다.
+
+`set_inner()` 헬퍼를 사용하여 `Escrow`를 채우는 것으로 시작한 다음, 다음과 같이 `transfer` CPI를 통해 토큰을 예치하는 것으로 넘어갑니다:
+
+```rust
+impl<'info> Make<'info> {
+    /// # Create the Escrow
+    fn populate_escrow(&mut self, seed: u64, amount: u64, bump: u8) -> Result<()> {
+        self.escrow.set_inner(Escrow {
+            seed,
+            maker: self.maker.key(),
+            mint_a: self.mint_a.key(),
+            mint_b: self.mint_b.key(),
+            receive: amount,
+            bump,
+        });
+
+        Ok(())
+    }
+
+    /// # Deposit the tokens
+    fn deposit_tokens(&self, amount: u64) -> Result<()> {
+        transfer_checked(
+            CpiContext::new(
+                self.token_program.to_account_info(),
+                TransferChecked {
+                    from: self.maker_ata_a.to_account_info(),
+                    mint: self.mint_a.to_account_info(),
+                    to: self.vault.to_account_info(),
+                    authority: self.maker.to_account_info(),
+                },
+            ),
+            amount,
+            self.mint_a.decimals,
+        )?;
+
+        Ok(())
+    }
+}
+```
+
+Anchor가 여러 가지 방식으로 도움을 주는 것을 볼 수 있습니다:
+- `set_inner()`: 모든 필드가 채워지도록 보장합니다.
+- `transfer_checked`: 앞서 사용한 시스템 헬퍼처럼 Token CPI를 래핑합니다.
+
+이제 다음과 같이 헬퍼를 사용하기 전에 몇 가지 확인을 수행하는 `handler` 함수를 생성하는 것으로 넘어갈 수 있습니다:
+
+```rust
+pub fn handler(ctx: Context<Make>, seed: u64, receive: u64, amount: u64) -> Result<()> {
+    // Validate the amount
+    require_gt!(receive, 0, EscrowError::InvalidAmount);
+    require_gt!(amount, 0, EscrowError::InvalidAmount);
+
+    // Save the Escrow Data
+    ctx.accounts.populate_escrow(seed, receive, ctx.bumps.escrow)?;
+
+    // Deposit Tokens
+    ctx.accounts.deposit_tokens(amount)?;
+
+    Ok(())
+}
+```
+
+여기서 `amount`와 `receive` 인수에 대해 두 가지 유효성 검사를 추가하여 둘 중 하나에 0 값을 전달하지 않도록 합니다.
+
+### 경고 (Warning)
+
+전송 후크(transfer hooks), 기밀 전송(confidential transfers), 기본 계정 상태(default account states)와 같은 SPL Token-2022의 특정 확장은 전송 차단, 자금 잠금, 에스크로 로직, 금고 또는 CPI에서 러그 풀(rug pulls)을 유발하는 것과 같은 취약점을 초래할 수 있습니다.
+
+- CPI 실패를 방지하려면 `mint_a`와 `mint_b`가 동일한 토큰 프로그램 소유인지 확인하십시오.
+- 표준 SPL Token 프로그램의 잘 감사된 토큰(예: USDC, wSOL)을 사용하십시오.
+- 검증되지 않았거나 복잡한 Token-2022 민트를 피하십시오.

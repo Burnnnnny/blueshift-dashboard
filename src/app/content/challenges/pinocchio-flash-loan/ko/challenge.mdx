@@ -1,0 +1,119 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+# 피노키오 플래시 론 (Pinocchio Flash Loan)
+
+![Pinocchio Flash Loan](/graphics/challenge-banners/pinocchio-flash-loan.png)
+
+명령어 인트로스펙션(Instruction Introspection)은 블록체인 프로그램이 동일한 트랜잭션 번들 내의 다른 명령어를 검사하고 분석할 수 있게 하는 강력한 기능입니다. 여기에는 아직 실행되지 않은 명령어도 포함되므로 트랜잭션의 향후 진행 상황에 따라 "미리 보고" 결정을 내릴 수 있습니다.
+
+트랜잭션을 위한 X-ray 비전이 있다고 생각하세요. 프로그램은 전체 트랜잭션을 꿰뚫어 보고 진행 방법을 결정하기 전에 전체 작업 순서를 이해할 수 있습니다.
+
+명령어 인트로스펙션의 가장 매력적인 응용 분야는 플래시 론(Flash Loan)입니다. 이는 단일 트랜잭션의 경계 내에서만 존재하는 독특한 유형의 대출입니다.
+
+플래시 론의 작동 방식은 다음과 같습니다:
+- **Borrow (대출)**: 트랜잭션 시작 시 `loan` 명령어를 사용하여 대규모 자본을 즉시 빌릴 수 있습니다.
+- **Use (사용)**: 이 빌린 자본을 동일한 트랜잭션 내에서 거래, 차익 거래 또는 기타 작업에 사용할 수 있습니다.
+- **Repay (상환)**: 트랜잭션이 끝나기 전에 `repay` 명령어를 사용하여 대출금과 소정의 수수료를 상환해야 합니다.
+
+핵심 통찰력은 플래시 론이 블록체인 트랜잭션의 원자적(atomic) 특성에 의존한다는 것입니다. 트랜잭션의 어느 부분이라도 실패하면(상환 포함) 전체 트랜잭션이 발생하지 않았던 것처럼 롤백됩니다. 즉, 대출 기관은 위험이 전혀 없습니다. 상환을 받거나 대출이 실제로 발생하지 않거나 둘 중 하나입니다.
+
+이 챌린지에서는 명령어 인트로스펙션이 실제로 작동하는 것을 보여주는 간단한 플래시 론 프로그램을 만듭니다. 프로그램은 대출 조건이 충족되는지 확인하기 위해 동일한 트랜잭션 내의 다른 명령어에 걸쳐 명령어 데이터와 계정을 검사합니다.
+
+명령어 인트로스펙션이 처음이라면 [명령어 인트로스펙션 과정](/ko/courses/instruction-introspection)을 먼저 시작하여 이 프로그램에서 사용되는 기본 개념을 이해하는 것이 좋습니다.
+
+<ArticleSection name="설치" id="installation" level="h2" />
+
+시작하기 전에 Rust와 Pinocchio가 설치되어 있는지 확인하세요. 그런 다음 터미널에서 다음을 실행합니다:
+
+```bash
+# create workspace
+cargo new blueshift_pinocchio_flash_loan --lib --edition 2021
+cd blueshift_pinocchio_flash_loan
+```
+
+`pinocchio`, `pinocchio-system` 및 `pinocchio-token`을 추가합니다:
+
+```bash
+cargo add pinocchio pinocchio-system pinocchio-token
+```
+
+`Cargo.toml`에 크레이트 유형을 선언하여 `target/deploy`에 배포 아티팩트를 생성합니다:
+
+```toml
+[lib]
+crate-type = ["lib", "cdylib"]
+```
+
+이제 플래시 론 프로그램을 작성할 준비가 되었습니다.
+
+<ArticleSection name="템플릿" id="template" level="h2" />
+
+이번에는 모든 것을 `lib.rs`에 배치하는 대신 프로그램을 작고 집중된 모듈로 나눕니다. 폴더 트리는 대략 다음과 같습니다:
+
+```
+src
+├── instructions
+│       ├── helpers.rs
+│       ├── loan.rs
+│       ├── mod.rs
+│       └── repay.rs
+├── lib.rs
+```
+
+**참고**: 프로그램을 테스트하기 위해 내부적으로 사용하므로 프로그램 ID를 `22222222222222222222222222222222222222222222`로 변경하는 것을 잊지 마세요.
+
+`lib.rs`의 진입점은 [Pinocchio 소개 과정](/ko/courses/introduction-to-pinocchio)에서 다룬 것과 매우 유사합니다.
+
+```rust
+use pinocchio::{account_info::AccountInfo, entrypoint, program_error::ProgramError, pubkey::Pubkey, ProgramResult};
+entrypoint!(process_instruction);
+
+pub mod instructions;
+pub use instructions::*;
+
+// 22222222222222222222222222222222222222222222
+pub const ID: Pubkey = [
+    0x0f, 0x1e, 0x6b, 0x14, 0x21, 0xc0, 0x4a, 0x07, 
+    0x04, 0x31, 0x26, 0x5c, 0x19, 0xc5, 0xbb, 0xee, 
+    0x19, 0x92, 0xba, 0xe8, 0xaf, 0xd1, 0xcd, 0x07, 
+    0x8e, 0xf8, 0xaf, 0x70, 0x47, 0xdc, 0x11, 0xf7, 
+];
+
+fn process_instruction(
+    _program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    match instruction_data.split_first() {
+        Some((Loan::DISCRIMINATOR, data)) => Loan::try_from((data, accounts))?.process(),
+        Some((Repay::DISCRIMINATOR, _)) => Repay::try_from(accounts)?.process(),
+        _ => Err(ProgramError::InvalidInstructionData)
+    }
+}
+```
+
+<ArticleSection name="도우미 (Helpers)" id="helpers" level="h2" />
+
+`loan` 및 `repay` 명령어를 살펴보기 전에 `helpers.rs`를 검토해 보겠습니다:
+
+```rust
+#[repr(C, packed)]
+pub struct LoanData {
+    pub protocol_token_account: [u8; 32],
+    pub balance: u64,
+}
+
+pub fn get_token_amount(data: &[u8]) ->  Result<u64, ProgramError> {
+    if !account.is_owned_by(&pinocchio_token::ID) {
+        return Err(PinocchioError::InvalidOwner.into());
+    }
+
+    if account.data_len().ne(&pinocchio_token::state::TokenAccount::LEN) {
+        return Err(PinocchioError::InvalidAccountData.into());
+    }
+
+    Ok(u64::from_le_bytes(data[64..72].try_into().unwrap()))
+}
+```
+
+이 파일은 간단합니다. 대출이 상환되기 전에 계정에 대출 데이터를 임시로 저장하는 데 사용할 `LoanData` 구조체가 포함되어 있습니다. 또한 계정에서 토큰 금액을 읽는 `get_token_amount()` 도우미 함수를 제공합니다.

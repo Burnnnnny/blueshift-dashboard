@@ -1,0 +1,119 @@
+# 금고 열기 (Open Vault)
+
+`open` 명령어는 lamports가 안전하게 예치될 프로그램 파생 주소(PDA) 금고를 생성합니다. 이 PDA는 해시된 공개 키를 시드로 사용하여 원래 키 소유자만 나중에 자금을 인출할 수 있도록 합니다.
+
+PDA는 다음과 같은 이유로 자금을 저장하는 안전한 방법을 제공합니다:
+- 오직 프로그램만이 계정을 제어할 수 있습니다(개인 키가 없음).
+- 금고 주소는 사용자 해시에서 결정적으로 파생됩니다.
+- 인출은 프로그램의 로직을 통해서만 발생할 수 있습니다.
+
+<ArticleSection name="필수 계정" id="required-accounts" level="h2" />
+
+명령어에는 다음 계정이 필요합니다:
+- `payer`: 금고 생성 비용을 지불합니다(서명자 및 가변이어야 함).
+- `vault`: 초기화되는 PDA(가변이어야 함).
+- `system_program`: 계정 생성에 필요함(실행 가능이어야 함).
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct OpenVaultAccounts<'a> {
+    pub payer: &'a AccountInfo,
+    pub vault: &'a AccountInfo,
+}
+
+impl<'a> TryFrom<&'a [AccountInfo]> for OpenVaultAccounts<'a> {
+    type Error = ProgramError;
+ 
+    fn try_from(accounts: &'a [AccountInfo]) -> Result<Self, Self::Error> {
+        let [payer, vault, _system_program] = accounts else {
+            return Err(ProgramError::NotEnoughAccountKeys);
+        };
+ 
+        Ok(Self { payer, vault })
+    }
+}
+```
+
+> 계정 검증은 `CreateAccount` CPI에 의해 처리됩니다. 계정이 요구 사항(서명자, 가변성, 실행 가능성)을 충족하지 않으면 명령어가 자동으로 실패합니다.
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+두 가지 데이터가 필요합니다:
+- `hash`: 사용자의 winternitz 키 쌍 공개 키의 SHA-256 해시 ([u8; 32])
+- `bump`: 클라이언트에서 전달된 PDA 파생 범프 (u8)
+
+> 계산 비용을 절약하기 위해 온체인에서 파생하는 대신 클라이언트로부터 범프를 전달받습니다.
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct OpenVaultInstructionData {
+    pub hash: [u8; 32],
+    pub bump: [u8; 1],
+}
+
+impl<'a> TryFrom<&'a [u8]> for OpenVaultInstructionData {
+    type Error = ProgramError;
+ 
+    fn try_from(data: &'a [u8]) -> Result<Self, Self::Error> {
+        if data.len() != core::mem::size_of::<OpenVaultInstructionData>() {
+            return Err(ProgramError::InvalidInstructionData);
+        }
+
+        let hash = data[0..32].try_into().map_err(|_| ProgramError::InvalidInstructionData)?;
+        let bump = data[32..33].try_into().map_err(|_| ProgramError::InvalidInstructionData)?;
+ 
+        Ok(Self { hash, bump })
+    }
+}
+```
+
+> 여기에서도 유효하지 않은 매개변수는 자체 수정됩니다. 잘못된 해시를 전달하면 금고를 사용할 수 없게 되고(brick), 잘못된 범프를 전달하면 PDA 파생에 실패합니다.
+
+<ArticleSection name="명령어 로직" id="instruction-logic" level="h2" />
+
+이 명령어는 우리 프로그램에 할당된 빈 PDA를 생성합니다. 계정에 데이터가 없지만 프로그램 소유권은 인출이 제어된 로직을 통해서만 발생할 수 있도록 보장합니다.
+
+> 빈 계정도 솔라나에 유지되려면 임대료가 면제되어야 합니다.
+
+코드에서는 다음과 같습니다:
+
+```rust
+pub struct OpenVault<'a> {
+    pub accounts: OpenVaultAccounts<'a>,
+    pub instruction_data: OpenVaultInstructionData,
+}
+
+impl<'a> TryFrom<(&'a [u8], &'a [AccountInfo])> for OpenVault<'a> {
+    type Error = ProgramError;
+
+    fn try_from((data, accounts): (&'a [u8], &'a [AccountInfo])) -> Result<Self, Self::Error> {
+        let instruction_data = OpenVaultInstructionData::try_from(data)?;
+        let accounts = OpenVaultAccounts::try_from(accounts)?;
+
+        Ok(Self { accounts, instruction_data })
+    }
+}
+
+impl<'a> OpenVault<'a> {
+    pub const DISCRIMINATOR: &'a u8 = &0;
+ 
+    pub fn process(&self) -> ProgramResult {
+        let lamports = Rent::get()?.minimum_balance(0);
+        let seeds = [Seed::from(&self.instruction_data.hash), Seed::from(&self.instruction_data.bump)];
+
+        // Create our vault
+        CreateAccount {
+            from: self.accounts.payer,
+            to: self.accounts.vault,
+            lamports,
+            space: 0,
+            owner: &crate::ID,
+        }
+        .invoke_signed(&[Signer::from(&seeds)])
+    }
+}
+```
+
+> 이 명령어는 금고 구조만 생성합니다. 예치는 금고 계정으로의 간단한 lamport 전송을 통해 별도로 처리됩니다.

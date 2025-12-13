@@ -1,0 +1,27 @@
+# 환불 (Refund)
+
+`refund` 명령어를 사용하면 메이커가 열린 제안을 취소할 수 있습니다:
+  - 에스크로 PDA를 닫고 임대료(rent) lamports를 메이커에게 돌려보냅니다.
+  - 전체 토큰 A 잔액을 보관소 밖으로 메이커에게 다시 이동시킨 다음 보관소 계정을 닫습니다.
+
+<ArticleSection name="필수 계정" id="required-account" level="h2" />
+
+필수 계정은 다음과 같습니다:
+
+- maker: 에스크로의 생성자. 서명자이자 가변이어야 함
+- escrow: 초기화하려는 에스크로 계정. 가변이어야 함
+- mint_a: 에스크로에 예치하는 토큰
+- vault: 에스크로가 소유한 연결된 토큰 계정. 가변이어야 함
+- maker_ata_a: 메이커가 소유한 연결된 토큰 계정. 가변이어야 함
+- system_program: 시스템 프로그램. 실행 가능이어야 함
+- token_program: 토큰 프로그램. 실행 가능이어야 함
+
+이제 과정에 익숙해졌을 것이므로 계정 구조체를 직접 만들어 보도록 하겠습니다.
+
+<ArticleSection name="명령어 데이터" id="instruction-data" level="h2" />
+
+로직을 수행하는 데 필요한 모든 데이터는 이미 에스크로 계정이나 역직렬화하는 계정에 있습니다. 따라서 이 명령어에는 `instruction_data`가 필요하지 않습니다.
+
+<ArticleSection name="로직 (Logic)" id="logic" level="h2" />
+
+여기서도 날개를 펼치고 이 로직을 직접 만들어 보도록 하겠습니다! 이전 섹션으로 돌아가서 make 및 take 명령어를 어떻게 구현했는지 확인하거나 막히면 Discord에 문의하는 것을 두려워하지 마세요.

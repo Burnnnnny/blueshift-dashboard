@@ -1,0 +1,25 @@
+import { ChallengeTitle } from "../../../../components/Challenges/ChallengeTitle";
+import { RequirementList } from "../../../../components/Challenges/RequirementList";
+import { Requirement } from "../../../../components/Challenges/Requirement";
+
+<ChallengeTitle>피노키오 AMM (Pinocchio AMM)</ChallengeTitle>
+
+이제 배운 내용을 테스트해 볼 시간입니다. 수업에서 배운 내용을 사용하여 다음 요구 사항을 충족하는 Pinocchio 프레임워크를 사용하는 amm 프로그램을 만드세요.
+
+<RequirementList>
+  <Requirement title="도전 과제 1: Config 계정 생성">
+    프로그램은 `initializer`가 `config` 계정을 만들고 LP 토큰에 대한 `Mint` 계정을 만들 수 있도록 해야 합니다. 명령어 판별자 값 `0`을 사용하여 이를 수행하는 명령어를 정의하세요.
+  </Requirement>
+
+  <Requirement title="도전 과제 2: Amm에 예치">
+    프로그램은 사용자가 Amm의 유동성 풀에 예치하고 기여에 대해 받을 LP 토큰의 양을 계산할 수 있도록 해야 합니다. 명령어 판별자 값 `1`을 사용하여 이를 수행하는 명령어를 정의하세요.
+  </Requirement>
+
+  <Requirement title="도전 과제 3: Amm에서 인출">
+    프로그램은 사용자가 Amm의 유동성 풀에서 인출하고 이를 위해 소각할 LP 토큰의 양을 계산할 수 있도록 해야 합니다. 명령어 판별자 값 `2`를 사용하여 이를 수행하는 명령어를 정의하세요.
+  </Requirement>
+
+  <Requirement title="도전 과제 4: Amm에서 스왑">
+    프로그램은 사용자가 Amm의 유동성 풀에서 스왑할 수 있도록 해야 합니다. 명령어 판별자 값 `3`을 사용하여 이를 수행하는 명령어를 정의하세요.
+  </Requirement>
+</RequirementList>

@@ -1,0 +1,66 @@
+import { ArticleSection } from "../../../../../components/ArticleSection/ArticleSection";
+
+<ArticleSection name="Refund" id="refund" level="h2" />
+
+이제 `refund.rs`에 있으며 다음 작업을 수행할 `refund` 명령어로 이동할 수 있습니다:
+- 에스크로 PDA를 닫고 렌트 램포트(rent lamports)를 메이커에게 다시 보냅니다.
+- 전체 Token A 잔액을 금고에서 꺼내 메이커에게 돌려보낸 다음 금고 계정을 닫습니다.
+
+### 계정 (Accounts)
+
+이 컨텍스트에 필요한 계정은 다음과 같습니다:
+- `maker`: 교환 조건을 결정한 사용자
+- `escrow`: 이 교환의 모든 조건이 있는 계정
+- `mint_a`: `maker`가 예치한 토큰
+- `vault`: 토큰이 예치된 `escrow` 및 `mint_a`와 연결된 토큰 계정
+- `maker_ata_a`: `vault`에서 토큰을 받을 `maker` 및 `mint_a`와 연결된 토큰 계정
+- `associated_token_program`: 연결된 토큰 계정을 생성하는 데 사용되는 연결된 토큰 프로그램
+- `token_program`: 전송을 CPI하는 데 사용되는 토큰 프로그램
+- `system_program`: `Escrow`를 생성하는 데 사용되는 시스템 프로그램
+
+이번에는 `Context`를 생성하여 도와드리지 않으니, 직접 해보세요! 계정 순서를 올바르게 사용해야 합니다. 그렇지 않으면 테스트가 실패합니다.
+
+### 로직 (Logic)
+
+로직은 `take` 명령어와 비슷하지만 이번에는 빈 금고를 닫기 전에 `vault`에서 `maker_ata_a`로 토큰을 이동하기만 하면 됩니다.
+
+이번에는 직접 수행하는 방법을 배울 차례이므로 정답이 무엇인지 알려드리지 않겠습니다.
+
+이것이 실행되면 제안은 무효가 되고 금고는 사라지며 메이커는 Token A와 렌트비를 지갑으로 돌려받게 된다는 점만 알아두세요.
+
+<ArticleSection name="진입점 (Entrypoint)" id="entrypoint" level="h2" />
+
+이제 다른 명령어에 모든 함수를 생성했으므로 생성한 모든 함수로 `lib.rs`를 채울 수 있습니다; 다음과 같이:
+
+```rust
+#[program]
+pub mod blueshift_anchor_escrow {
+    use super::*;
+
+    pub fn make(ctx: Context<Make>, seed: u64, receive: u64, amount: u64) -> Result<()> {
+        instructions::make::handler(ctx, seed, receive, amount)
+    }
+
+    pub fn take(ctx: Context<Take>) -> Result<()> {
+        instructions::take::handler(ctx)
+    }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        instructions::refund::handler(ctx)
+    }
+}
+```
+
+<ArticleSection name="결론 (Conclusion)" id="conclusion" level="h2" />
+
+이제 우리의 단위 테스트에 대해 프로그램을 테스트하고 NFT를 청구할 수 있습니다!
+
+터미널에서 다음 명령을 사용하여 프로그램을 빌드하는 것으로 시작하세요
+
+```bash
+anchor build
+```
+
+그러면 `target/deploy` 폴더에 `.so` 파일이 직접 생성됩니다.
+
+이제 `take challenge` 버튼을 클릭하고 거기에 파일을 놓으세요!

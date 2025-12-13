@@ -1,0 +1,155 @@
+import { ArticleSection } from "../../../../components/ArticleSection/ArticleSection";
+
+![Anchor Escrow Challenge](/graphics/challenge-banners/anchor-escrow.png)
+
+# 에스크로 (The Escrow)
+
+에스크로는 두 당사자 간의 안전한 토큰 스왑을 가능게 하는 강력한 금융 도구입니다.
+
+Token A를 잠기게 하고 다른 사용자가 Token B를 예치할 때까지 기다리는 디지털 안전 금고라고 생각하면 됩니다. 스왑이 완료되기 전에 스왑이 완료됩니다.
+
+이는 어느 당사자도 상대방이 거래를 철회할 것에 대해 걱정할 필요가 없는 신뢰할 수 없는 환경을 조성합니다.
+
+이 챌린지에서는 세 가지 간단하지만 강력한 명령을 통해 이 개념을 구현할 것입니다:
+- **Make**: 메이커(첫 번째 사용자)는 거래 조건을 정의하고 약속된 양의 Token A를 안전한 금고에 예치합니다. 이것은 물건을 안전 금고에 넣고 교환 조건을 설정하는 것과 같습니다.
+- **Take**: 테이커(두 번째 사용자)는 약속된 양의 Token B를 메이커에게 전송하여 제안을 수락하고, 그 대가로 잠긴 Token A를 받습니다. 이것은 두 당사자가 거래의 측면을 완료하는 순간입니다.
+- **Refund**: 메이커가 마음을 바꾸거나 적절한 테이커를 찾을 수 없는 경우 제안을 취소하고 Token A를 회수할 수 있습니다. 이것은 거래가 성사되지 않을 경우 안전 금고에서 물건을 다시 가져오는 것과 같습니다.
+
+**참고**: Anchor에 익숙하지 않은 경우 [Anchor for Dummies](/ko/courses/anchor-for-dummies)를 읽고 이 프로그램에서 사용할 핵심 개념을 숙지해야 합니다.
+
+<ArticleSection name="설치" id="installation" level="h2" />
+
+새로운 Anchor 작업 공간을 만드는 것으로 시작하겠습니다:
+
+```bash
+anchor init blueshift_anchor_escrow
+cd blueshift_anchor_escrow
+```
+
+그런 다음 `anchor-lang` 크레이트에서 `init-if-needed`를 활성화하고 `anchor-spl` 크레이트도 추가합니다:
+
+```bash
+cargo add anchor-lang --features init-if-needed
+cargo add anchor-spl
+```
+
+`anchor-spl`을 사용하므로 `programs/blueshift_anchor_escrow/Cargo.toml` 파일도 업데이트하여 `idl-build` 기능에 `anchor-spl/idl-build`를 포함해야 합니다.
+
+`Cargo.toml`을 열면 다음과 같은 기존 `idl-build` 줄이 표시됩니다:
+
+```toml
+idl-build = ["anchor-lang/idl-build"]
+```
+
+`anchor-spl/idl-build`도 추가하도록 수정합니다:
+
+```toml
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+```
+
+이제 새로 생성된 폴더를 열고 코딩을 시작할 준비가 되었습니다!
+
+<ArticleSection name="템플릿" id="template" level="h2" />
+
+이번에는 프로그램이 꽤 복잡하기 때문에 모든 것을 `lib.rs`에 집어넣는 대신 작고 집중된 모듈로 나눌 것입니다.
+
+폴더 트리는 대략 다음과 같습니다:
+
+```
+src
+├── instructions
+│       ├── make.rs
+│       ├── mod.rs
+│       ├── refund.rs
+│       └── take.rs
+├── errors.rs
+├── lib.rs
+└── state.rs
+```
+
+`lib.rs`는 대략 다음과 같습니다:
+
+```rust
+use anchor_lang::prelude::*;
+
+mod state;
+mod errors;
+mod instructions;
+use instructions::*;
+
+declare_id!("22222222222222222222222222222222222222222222");
+
+#[program]
+pub mod blueshift_anchor_escrow {
+    use super::*;
+
+    #[instruction(discriminator = 0)]
+    pub fn make(ctx: Context<Make>, seed: u64, receive: u64, amount: u64) -> Result<()> {
+        //...
+    }
+
+    #[instruction(discriminator = 1)]
+    pub fn take(ctx: Context<Take>) -> Result<()> {
+        //...
+    }
+
+    #[instruction(discriminator = 2)]
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        //...
+    }
+}
+```
+
+보시다시피 명령어에 대한 사용자 정의 구분자(discriminator)를 구현했습니다. 따라서 anchor 버전 0.31.0 이상을 사용해야 합니다.
+
+<ArticleSection name="상태 (State)" id="state" level="h2" />
+
+`Escrow`에 대한 모든 데이터가 있는 `state.rs`로 이동하겠습니다. 이를 위해 사용자 정의 구분자를 제공하고 구조체를 `#[account]` 매크로로 다음과 같이 래핑할 것입니다:
+
+```rust
+use anchor_lang::prelude::*;
+
+#[derive(InitSpace)]
+#[account(discriminator = 1)]
+pub struct Escrow {
+    pub seed: u64,
+    pub maker: Pubkey,
+    pub mint_a: Pubkey,
+    pub mint_b: Pubkey,
+    pub receive: u64,
+    pub bump: u8,
+}
+```
+
+각 필드의 역할:
+- **seed**: 시드 파생 중에 사용되는 임의의 숫자로, 한 메이커가 동일한 토큰 쌍으로 여러 에스크로를 열 수 있습니다. PDA를 항상 다시 파생할 수 있도록 온체인에 저장됩니다.
+- **maker**: 에스크로를 생성한 지갑; 환불 및 지불을 받는 데 필요합니다.
+- **mint_a** & **mint_b**: 스왑의 "제공" 및 "수령" 측면에 대한 SPL 민트 주소입니다.
+- **receive**: 메이커가 원하는 Token B의 양입니다. (금고의 잔액 자체가 Token A가 얼마나 예치되었는지 보여주므로 저장하지 않습니다.)
+- **bump**: 캐시된 범프 바이트; 즉석에서 파생하면 컴퓨팅 비용이 들기 때문에 한 번 저장합니다.
+
+더 많은 정보를 넣을 수도 있지만 바이트가 추가되면 렌트비가 추가됩니다. 필수 요소만 저장하면 예치금을 저렴하게 유지하면서도 프로그램이 필요한 모든 규칙을 시행할 수 있습니다.
+
+이 구조체의 렌트비를 수동으로 계산할 필요가 없도록 `#[derive(InitSpace)]` 매크로를 추가하여 마무리합니다.
+
+<ArticleSection name="오류 (Errors)" id="errors" level="h2" />
+
+이제 `errors.rs` 파일로 이동하여 나중에 사용할 몇 가지 오류를 다음과 같이 추가할 수 있습니다:
+
+```rust
+use anchor_lang::prelude::*;
+
+#[error_code]
+pub enum EscrowError {
+    #[msg("Invalid amount")]
+    InvalidAmount,
+    #[msg("Invalid maker")]
+    InvalidMaker,
+    #[msg("Invalid mint a")]
+    InvalidMintA,
+    #[msg("Invalid mint b")]
+    InvalidMintB,
+}
+```
+
+각 열거형은 제약 조건이나 `require!()`가 실패할 때마다 Anchor가 표면화할 명확하고 사람이 읽을 수 있는 메시지에 매핑됩니다.
