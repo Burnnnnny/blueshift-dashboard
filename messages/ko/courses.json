@@ -2,6 +2,7 @@
   "courses": {
     "introduction-to-blockchain-and-solana": {
       "title": "블록체인과 Solana 소개",
+      "description": "블록체인 기술의 기본을 이해하고, Solana가 고속·저비용 트랜잭션으로 탈중앙화 컴퓨팅을 어떻게 혁신하는지 살펴보세요.",
       "lessons": {
         "introduction": "소개",
         "blockchain-fundamentals": "블록체인 기초",
@@ -12,6 +13,7 @@
     },
     "anchor-for-dummies": {
       "title": "입문자를 위한 Anchor",
+      "description": "Solana 개발을 위한 강력한 Rust 프레임워크인 Anchor를 기초 설치부터 고급 패턴과 배포까지 단계별로 익혀보세요.",
       "lessons": {
         "anchor-101": "Anchor 101",
         "anchor-accounts": "Anchor 계정",
@@ -25,6 +27,7 @@
     },
     "pinocchio-for-dummies": {
       "title": "입문자를 위한 Pinocchio",
+      "description": "가벼우면서도 고성능인 Pinocchio 프레임워크로, 최소한의 오버헤드로 효율적인 Solana 프로그램을 작성하는 방법을 배웁니다.",
       "lessons": {
         "pinocchio-101": "Pinocchio 101",
         "pinocchio-accounts": "Pinocchio 계정",
@@ -40,6 +43,7 @@
     },
     "introduction-to-assembly": {
       "title": "어셈블리 소개",
+      "description": "sBPF 어셈블리가 Solana 프로그램에서 어떤 역할을 하는지 이해하고, 저수준 명령어가 블록체인 실행을 어떻게 구동하는지 배워보세요.",
       "lessons": {
         "assembly-101": "어셈블리 101",
         "registers-and-memory": "레지스터와 메모리",
@@ -51,6 +55,7 @@
     },
     "program-security": {
       "title": "프로그램 보안",
+      "description": "주요 취약점과 공격 벡터를 이해하고, Solana 프로그램을 보호하기 위한 필수 보안 모범 사례와 패턴을 익히세요.",
       "lessons": {
         "introduction": "소개",
         "signer-checks": "서명자 확인",
@@ -67,6 +72,7 @@
     },
     "secp256r1-on-solana": {
       "title": "Solana의 Secp256r1",
+      "description": "Anchor와 Pinocchio 양쪽 프레임워크를 활용해 Solana에서 Secp256r1 전자서명을 구현하는 방법을 배워보세요.",
       "lessons": {
         "introduction": "Solana의 Secp256r1",
         "secp256r1-with-anchor": "Anchor와 Secp256r1",
@@ -76,6 +82,7 @@
     },
     "tokens-on-solana": {
       "title": "Solana의 토큰",
+      "description": "Solana 토큰 표준과 민트/토큰 계정 구조를 이해하고, SPL Token 프로그램을 활용하는 방법을 학습합니다.",
       "lessons": {
         "introduction": "소개",
         "mint-and-token-accounts": "민트 및 토큰 계정",
@@ -86,6 +93,7 @@
     },
     "nfts-on-solana": {
       "title": "Solana의 NFT",
+      "description": "Metaplex Token Metadata와 Metaplex Core 표준을 사용해 Solana에서 NFT를 생성·관리하는 전 과정을 다룹니다.",
       "lessons": {
         "introduction": "소개",
         "metaplex-token-metadata": "Metaplex 토큰 메타데이터",
@@ -95,6 +103,7 @@
     },
     "spl-token-with-web3js": {
       "title": "Web3.js와 SPL 토큰",
+      "description": "TypeScript와 Web3.js를 활용해 SPL 토큰을 발행하고, 전송·권한 관리까지 전체 라이프사이클을 다뤄봅니다.",
       "lessons": {
         "introduction": "소개",
         "mint-to": "발행(Mint To)",
@@ -109,6 +118,7 @@
     },
     "spl-token-with-anchor": {
       "title": "Anchor와 SPL 토큰",
+      "description": "Anchor 프레임워크로 필수 SPL 토큰 기능을 모두 구현하며, 견고한 토큰 프로그램을 설계하는 방법을 익혀보세요.",
       "lessons": {
         "introduction": "소개",
         "mint-to": "발행(Mint To)",
@@ -123,6 +133,7 @@
     },
     "token-2022-program": {
       "title": "Token2022 프로그램",
+      "description": "토큰 확장(Token Extensions) 개념과 함께, Solana 토큰의 다음 진화 단계인 Token-2022가 제공하는 강력한 기능들을 살펴봅니다.",
       "lessons": {
         "introduction": "소개",
         "token-extensions": "토큰 확장(Extensions)",
@@ -131,6 +142,7 @@
     },
     "token-2022-with-web3js": {
       "title": "Web3.js와 Token2022",
+      "description": "전송 수수료, 메타데이터 등 다양한 Token-2022 확장을 TypeScript와 Web3.js로 구현해 봅니다.",
       "lessons": {
         "introduction": "소개",
         "transfer-fee-extension": "전송 수수료 확장",
@@ -149,6 +161,7 @@
     },
     "token-2022-with-anchor": {
       "title": "Anchor와 Token2022",
+      "description": "Anchor 기반으로 모든 Token-2022 확장을 활용해, 최대 기능을 갖춘 고급 토큰 프로그램을 구축합니다.",
       "lessons": {
         "introduction": "소개",
         "transfer-fee-extension": "전송 수수료 확장",
@@ -167,6 +180,7 @@
     },
     "instruction-introspection": {
       "title": "명령어 인트로스펙션(Instruction Introspection)",
+      "description": "Anchor와 Pinocchio를 활용하여 Solana 프로그램 내부에서 명령어를 검사·분석(Introspection)하는 기법을 익혀보세요.",
       "lessons": {
         "introduction": "소개",
         "introspection-with-anchor": "Anchor를 이용한 인트로스펙션",
@@ -176,6 +190,7 @@
     },
     "testing-with-mollusk": {
       "title": "Mollusk로 테스트하기",
+      "description": "Mollusk의 강력한 테스트 프레임워크를 활용해 Solana 프로그램을 종합적으로 검증하는 방법을 배웁니다.",
       "lessons": {
         "mollusk-101": "Mollusk 101",
         "advanced-functionalities": "고급 기능",
@@ -184,6 +199,7 @@
     },
     "solana-pay": {
       "title": "Solana Pay",
+      "description": "Solana Pay를 활용해 전송 요청과 트랜잭션 요청을 중심으로 한 온체인 결제 솔루션을 설계해 봅니다.",
       "lessons": {
         "introduction": "소개",
         "transfer-request": "전송 요청",
@@ -193,6 +209,7 @@
     },
     "create-your-sdk-with-codama": {
       "title": "Codama로 SDK 만들기",
+      "description": "Codama의 IDL 기반 코드 생성을 활용해 Solana 프로그램을 위한 타입 안전 SDK를 자동으로 생성하는 방법을 다룹니다.",
       "lessons": {
         "introduction": "소개",
         "codama-from-scratch": "처음부터 Codama IDL 만들기",
@@ -203,6 +220,7 @@
     },
     "winternitz-signatures-on-solana": {
       "title": "Solana의 Winternitz 서명",
+      "description": "양자 내성(Quantum-resistant)을 갖춘 Winternitz 서명을 Solana에서 Anchor와 Pinocchio로 구현하는 방법을 배워보세요.",
       "lessons": {
         "introduction": "소개",
         "winternitz-signatures-with-anchor": "Anchor와 Winternitz 서명",
@@ -212,6 +230,7 @@
     },
     "testing-with-litesvm": {
       "title": "LiteSVM으로 테스트하기",
+      "description": "TypeScript와 Rust 환경 모두를 지원하는 LiteSVM으로 테스트 워크플로우를 가속하는 방법을 알아봅니다.",
       "lessons": {
         "litesvm-101": "LiteSVM 101",
         "typescript": "LiteSVM과 Typescript",
@@ -221,6 +240,7 @@
     },
     "testing-with-surfpool": {
       "title": "Surfpool로 테스트하기",
+      "description": "Surfpool의 고급 테스트 기능을 활용해 견고하고 신뢰성 높은 Solana 프로그램을 검증하는 방법을 학습합니다.",
       "lessons": {
         "surfpool-101": "Surfpool 101",
         "advanced-functionalities": "고급 기능",
