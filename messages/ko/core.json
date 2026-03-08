@@ -1,20 +1,21 @@
 {
   "metadata": {
-    "title": "Blueshift",
-    "description": "Solana 생태계 최고의 강사들로부터 나만의 온체인 프로그램을 작성하는 방법을 배워보세요.",
-    "keywords": "Solana, Blueshift, 학습, 자격, 볼트, 에스크로, AMM, 네이티브, 피노키오, 양자, SPL 토큰"
+    "title": "Blueshift | Solana 개발 학습 - 무료 코스와 튜토리얼",
+    "description": "Anchor, Rust, TypeScript 무료 코스로 Solana 개발을 배워보세요. 실습 챌린지로 DeFi 프로토콜, NFT, 스마트 컨트랙트를 직접 구현할 수 있습니다.",
+    "keywords": "Solana, Blueshift, 학습, 자격, 볼트, 에스크로, AMM, 네이티브, 피노키오, 양자, SPL 토큰",
+    "coursesTitle": "Solana 개발 코스 | Anchor, Rust, TypeScript | Blueshift"
   },
   "header": {
     "lessons": "레슨",
     "courses": "코스",
     "perks": "혜택",
     "challenges": "챌린지",
-    "paths": "경로",
+    "paths": "학습 경로",
     "set_goal": "목표 설정",
     "connect_wallet": "지갑 연결"
   },
   "lessons": {
-    "title": "개별 코스 수강하기",
+    "title": "Solana 개발 코스 - Anchor, Rust, TypeScript",
     "subtitle": "코스",
     "subtitle_returning": "개별 코스 수강하기",
     "title_returning": "코스로 돌아가기",
@@ -38,10 +39,14 @@
     "skip_lesson_divider_title": "또는 챌린지로 건너뛰기",
     "skip_lesson": "레슨 건너뛰기",
     "lesson_completed": "축하합니다, 이 코스를 마쳤습니다!",
-    "view_other_courses": "다른 코스 보기"
+    "view_other_courses": "다른 코스 보기",
+    "explore_more_courses": "다른 코스 둘러보기",
+    "next_unit": "다음 유닛",
+    "path_completed": "축하합니다! 이 학습 경로를 완료했습니다.",
+    "explore_more_paths": "다른 학습 경로 둘러보기"
   },
   "paths": {
-    "title": "학습 경로 선택하기",
+    "title": "Solana 개발 학습 경로",
     "subtitle": "경로",
     "learning_path": "학습 경로",
     "get_started": "// 체계적인 학습 여정을 따라가세요",
@@ -57,7 +62,7 @@
     "challenges": "챌린지",
     "steps": "단계",
     "units": "유닛",
-    "steps_completed": "완료된 단계",
+    "steps_completed": "완료한 단계",
     "path_steps": "경로 단계",
     "progress": "진행률",
     "empty_title": "경로를 찾을 수 없습니다",
@@ -97,12 +102,20 @@
     "payments-and-commerce": {
       "title": "결제 및 커머스",
       "description": "Solana Pay와 토큰 인프라를 사용하여 결제 솔루션을 구축하세요."
+    },
+    "introduction-to-blockchain-and-solana": {
+      "title": "블록체인과 Solana 입문",
+      "description": "블록체인 기초부터 토큰과 NFT까지, Solana 개발의 핵심 개념을 차근차근 익혀보세요."
+    },
+    "solana-mobile-mastery": {
+      "title": "Solana 모바일 마스터리",
+      "description": "React Native, Mobile Wallet Adapter, 배포 전략까지 익혀 Solana 모바일 앱을 실전에 배포해 보세요."
     }
   },
   "perks": {
     "title": "보상 교환하기",
     "subtitle": "혜택",
-    "faucet_title": "수도꼭지 (Faucet)",
+    "faucet_title": "파우셋",
     "rewards_title": "보상",
     "empty_title": "보상을 찾을 수 없습니다",
     "empty_description": "챌린지를 완료하여 보상을 획득하세요.",
@@ -120,13 +133,14 @@
     "rust": "Rust",
     "typescript": "Typescript",
     "assembly": "Assembly",
-    "general": "일반"
+    "general": "일반",
+    "mobile": "모바일"
   },
   "ChallengeCenter": {
     "title": "완료하고 NFT 및 혜택 받기",
     "subtitle": "챌린지",
-    "Unclaimed": "미청구",
-    "claimed": "민팅됨",
+    "Unclaimed": "미민팅",
+    "claimed": "민팅 완료",
     "claim": "민팅하기",
     "locked": "잠김",
     "get_started": "// 새로운 지식을 시험해 보세요",
@@ -139,12 +153,12 @@
     "filter__label": "모든 상태",
     "filter__all_statuses": "전체",
     "filter__selected_statuses": "상태",
-    "complete_to_earn": "완료하고 획득하기"
+    "complete_to_earn": "완료하고 보상 받기"
   },
   "challenge_statuses": {
     "open": "진행 중",
     "completed": "완료됨",
-    "claimed": "수령함"
+    "claimed": "민팅 완료"
   },
   "challenge_status_descriptions": {
     "locked": "이 챌린지는 잠겨 있습니다",
@@ -173,7 +187,7 @@
       "network_error": "서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.",
       "auth_generic": "예기치 않은 오류가 발생했습니다. 다시 시도해 주세요."
     },
-    "content_fallback": "이 콘텐츠는 번역 중이며 준비가 완료되면 이곳에서 확인할 수 있습니다."
+    "content_fallback": "이 콘텐츠는 아직 한국어로 번역 중이며, 준비되는 대로 이곳에서 확인할 수 있습니다."
   },
   "course_levels": {
     "1": "초급",
@@ -235,8 +249,8 @@
     "loaded_from_auto_save": "이전 세션에서 코드가 로드되었습니다"
   },
   "marketing_banner": {
-    "title": "Blueshift 개선을 돕기 위해 스테이킹을 고려해 주세요",
-    "mobile": "Blueshift 개선을 위해 <link>스테이킹</link>을 고려해 주세요",
-    "button": "스테이킹"
+    "title": "Blueshift 개선을 돕는 스테이킹을 고려해 보세요",
+    "mobile": "Blueshift 개선을 위해 <link>스테이킹</link>을 고려해 보세요",
+    "button": "스테이킹하기"
   }
 }
