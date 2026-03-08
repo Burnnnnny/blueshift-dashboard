@@ -29,7 +29,7 @@ export default async function ChallengeLayout({
 
   return (
     <div className="flex flex-col w-full border-b border-b-border">
-      <div className="w-full">
+      <div className="relative max-w-app mx-auto w-full app:border-x border-border-light">
         <Breadcrumbs
           items={[
             { label: t("header.challenges"), href: "/challenges" },
@@ -40,9 +40,9 @@ export default async function ChallengeLayout({
           badge={challengeMetadata.language}
           title={challengePageTitle}
           badgeColor={challengeMetadata.language}
-          className="border-x-0 app:border-x"
           collectionSize={collectionSize}
           collectionMintAddress={collectionMintAddress}
+          showBorder={false}
         />
       </div>
 
@@ -56,7 +56,8 @@ export default async function ChallengeLayout({
           {pagination}
           <div
             className={classNames(
-              "py-5 order-2 lg:order-1 col-span-1 flex flex-col gap-y-8 lg:border-t-0 app:border-x border-border-light px-5",
+              "py-5 order-2 lg:order-1 col-span-1 flex flex-col gap-y-8 lg:border-t-0 lg:border-x border-border-light px-5 lg:px-6",
+              !isTestPage && "lg:border-r border-border-light",
               isTestPage
                 ? "md:col-span-9 lg:col-span-10 xl:col-span-14"
                 : "md:col-span-7 xl:col-span-8"
