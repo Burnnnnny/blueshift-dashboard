@@ -10,7 +10,6 @@ import CourseCard from "../CourseCard/CourseCard";
 import ChallengeCard from "../ChallengeCard/ChallengeCard";
 import NFTViewer from "../NFTViewer/NFTViewer";
 import classNames from "classnames";
-import { Icon } from "@blueshift-gg/ui-components";
 import PathItemDivider from "./PathItemDivider";
 import { useWindowSize } from "usehooks-ts";
 import CourseCardSkeleton from "../CourseCard/CourseCardSkeleton";
@@ -35,7 +34,6 @@ const chunk = <T,>(arr: T[], size: number): T[][] =>
 export default function PathStepsList({
   path,
   steps,
-  locale,
 }: PathStepsListProps) {
   const t = useTranslations();
   const { courseProgress, challengeStatuses } = usePersistentStore();

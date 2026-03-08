@@ -13,8 +13,6 @@ export const AnchorDiscriminatorCalculator = ({
   const [seed, setSeed] = useState(value);
   const [accountDiscriminator, setAccountDiscriminator] = useState("");
   const [instructionDiscriminator, setInstructionDiscriminator] = useState("");
-  const [accountSeedFormatted, setAccountSeedFormatted] = useState("");
-  const [instructionSeedFormatted, setInstructionSeedFormatted] = useState("");
 
   // SHA256 implementation for browser
   const sha256 = async (message: string) => {
@@ -44,8 +42,6 @@ export const AnchorDiscriminatorCalculator = ({
     if (!inputSeed.trim()) {
       setAccountDiscriminator("");
       setInstructionDiscriminator("");
-      setAccountSeedFormatted("");
-      setInstructionSeedFormatted("");
       return;
     }
 
@@ -53,9 +49,6 @@ export const AnchorDiscriminatorCalculator = ({
       // Convert seed to appropriate case
       const accountSeed = toPascalCase(inputSeed);
       const instructionSeed = toSnakeCase(inputSeed);
-
-      setAccountSeedFormatted(accountSeed);
-      setInstructionSeedFormatted(instructionSeed);
 
       // Account discriminator: sha256("account:" + PascalCase)[0..8]
       const accountHash = await sha256(`account:${accountSeed}`);

@@ -4,9 +4,8 @@ import Modal from "./Modal";
 import { useTranslations } from "next-intl";
 import { Button } from "@blueshift-gg/ui-components";
 import DecryptedText from "../HeadingReveal/DecryptText";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "motion/react";
-import { anticipate } from "motion";
 import useMintNFT from "@/hooks/useMintNFT";
 import { usePersistentStore } from "@/stores/store";
 import { Link } from "@/i18n/navigation";
@@ -25,17 +24,10 @@ export default function ChallengeCompleted({
   challenge,
 }: ChallengeCompletedProps) {
   const t = useTranslations();
-  const [isAnimating, setIsAnimating] = useState(false);
   const { mint, isLoading } = useMintNFT();
   const { challengeStatuses } = usePersistentStore();
   const currentCourseStatus = challengeStatuses[challenge.slug];
   const challengeShareUrl = useShareChallengeOnX(challenge);
-
-  useEffect(() => {
-    setTimeout(() => {
-      setIsAnimating(true);
-    }, 100);
-  }, []);
 
   const [isHovering, setIsHovering] = useState(false);
   const closeModal = () => {

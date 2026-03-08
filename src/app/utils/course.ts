@@ -3,8 +3,6 @@ import {
   languageColors,
   difficulty,
   difficultyColors,
-  Language,
-  Difficulty,
 } from "./common";
 
 // Re-export with course-specific names for backward compatibility

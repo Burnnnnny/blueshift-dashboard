@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import React, {
@@ -14,7 +15,6 @@ import * as THREE from "three";
 import { extend } from "@react-three/fiber";
 import { courseColors, CourseDifficulty } from "@/app/utils/course";
 import { Text } from "@react-three/drei";
-import { useWindowSize } from "usehooks-ts";
 import { CourseLanguages } from "@/app/utils/course";
 import classNames from "classnames";
 import { resolveColorVar } from "@/app/utils/color-helper";
@@ -460,7 +460,6 @@ function Scene({
 }) {
   const orbitControlsRef = useRef<any>(null);
   const meshRef = useRef<any>(null);
-  const light = useRef<any>(null);
   const { gl, scene, camera } = useThree();
 
   // Animation state for the entire group
@@ -1153,8 +1152,6 @@ export default function NFTScene({
   showControls?: boolean;
   showBackground?: boolean;
 }) {
-  const { width } = useWindowSize();
-
   // State for controllable parameters
   const [challengeName, setChallengeName] = useState(initialChallengeName);
   const [challengeLanguage, setChallengeLanguage] = useState(

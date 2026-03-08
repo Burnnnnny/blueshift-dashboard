@@ -13,7 +13,6 @@ import {
   WsReceiveDecision,
   WsSendDecision,
 } from "@/hooks/useEsbuildRunner";
-import { TestRequirement } from "@/app/components/TSChallengeEnv/types/test-requirements";
 import { useEffect, useState } from "react";
 import { Icon } from "@blueshift-gg/ui-components";
 import { Button } from "@blueshift-gg/ui-components";
@@ -35,7 +34,7 @@ export default function IDE({ initialCode, title, fileName }: IDEProps) {
   const [ideView, setIdeView] = useState<"minified" | "expanded">("minified");
   const [isPanelOpen, setIsPanelOpen] = useState(false);
 
-  const [editorCode, setEditorCode] = useState<string>(initialCode);
+  const [, setEditorCode] = useState<string>(initialCode);
   const [wasSendTransactionIntercepted, setWasSendTransactionIntercepted] =
     useState(false);
   const [
@@ -164,13 +163,10 @@ export default function IDE({ initialCode, title, fileName }: IDEProps) {
   };
 
   const {
-    esBuildInitializationState,
     isRunning: isCodeRunning,
     logs: runnerLogs,
     error: runnerError,
     addLog,
-    runCode,
-    clearLogs: clearRunnerLogs,
   } = useEsbuildRunner({
     onRpcCallInterceptedForDecision: handleRpcCallForDecision,
     onWsSendInterceptedForDecision: handleWsSendForDecision,
@@ -208,43 +204,6 @@ export default function IDE({ initialCode, title, fileName }: IDEProps) {
     addLog,
   ]);
 
-  const handleRunCode = () => {
-    if (esBuildInitializationState !== "initialized") {
-      // TODO Consider using a toast notification or inline message instead of alert
-      alert("Code runner is not ready yet. Please wait a moment.");
-      return;
-    }
-    clearRunnerLogs();
-    setWasSendTransactionIntercepted(false); // Reset flag before new run
-    setVerificationFailureMessageLogged(false); // Reset verification failure flag
-    runCode(editorCode).catch(console.error);
-  };
-
-  // Test requirements
-  const requirements: TestRequirement[] = [
-    {
-      status: "incomplete",
-      instructionKey: "test_1",
-      title: "Test 1",
-    },
-  ];
-
-  // Test verification data received from the backend
-  const verificationData = {
-    success: true,
-    results: [
-      {
-        success: true,
-        instruction: "test_1",
-        compute_units_consumed: 1000,
-        execution_time: 200,
-        program_logs: ["Program log 1", "Program log 2"],
-      },
-    ],
-  };
-
-  // Used to indicate if there is some kind of error in the verification process
-  const verificationError = null;
   // Indicate if the verification is in progress
   // TODO rename this to isVerifying
   const isVerificationLoading = false;

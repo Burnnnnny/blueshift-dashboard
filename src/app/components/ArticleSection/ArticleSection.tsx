@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import CopyClipboard from "../CopyClipboard/CopyClipboard";
-import { Icon } from "@blueshift-gg/ui-components";
 import { usePathname } from "@/i18n/navigation";
 
 export function ArticleSection({

@@ -16,28 +16,9 @@ interface CourseFooterProps {
   challenge: ChallengeMetadata;
 }
 
-const COURSE_TOPICS: Record<string, string> = {
-  "introduction-to-assembly": "sBPF assembly optimization and JIT compilation",
-  "pinocchio-for-dummies": "low-level Solana optimization techniques",
-  "introduction-to-blockchain-and-solana": "Solana development",
-  "anchor-for-dummies": "Anchor framework internals",
-  "program-security": "Solana security",
-  "secp256r1-on-solana": "cryptography on Solana",
-  "tokens-on-solana": "token development",
-  "nfts-on-solana": "NFT development",
-  "spl-token-with-web3js": "SPL token development",
-  "spl-token-with-anchor": "SPL token development",
-  "token-2022-program": "Token-2022 development",
-  "token-2022-with-web3js": "Token-2022 development",
-  "token-2022-with-anchor": "Token-2022 development",
-  "instruction-introspection": "advanced Solana patterns",
-  "testing-with-mollusk": "Solana testing",
-  "solana-pay": "Solana payments",
-  "create-your-sdk-with-codama": "SDK development",
-  "winternitz-signatures-on-solana": "cryptography on Solana",
-  "testing-with-litesvm": "Solana testing",
-  "testing-with-surfpool": "Solana testing",
-}
+type Analytics = {
+  track: (eventName: string, payload: Record<string, string>) => void;
+};
 
 export default function CourseFooter({
   nextLesson,
@@ -85,20 +66,22 @@ export default function CourseFooter({
 
   const isLastPathUnit =
     !!pathSlug && !!steps && currentPathIndex >= 0 && !nextStep;
-  const topic = COURSE_TOPICS[courseMetadata.slug] || "advanced Solana topics";
 
   const handleArticleClick = useCallback(
     (articleId: string) => {
-      if (typeof window !== "undefined" && (window as any).analytics) {
-        ; (window as any).analytics.track("research_link_clicked", {
+      const analytics = (
+        window as Window & { analytics?: Analytics }
+      ).analytics;
+      if (analytics) {
+        analytics.track("research_link_clicked", {
           source: "course_conclusion",
           course: courseMetadata.slug,
           article: articleId,
-        })
+        });
       }
     },
     [courseMetadata.slug]
-  )
+  );
 
   const getLessonHref = (lessonSlug: string) =>
     pathSlug
@@ -284,4 +267,3 @@ export default function CourseFooter({
     </div>
   );
 }
-

@@ -5,7 +5,6 @@ import {
   HeadingReveal,
   BRAND_COLOURS,
 } from "@blueshift-gg/ui-components";
-import { useTranslations } from "next-intl";
 import classNames from "classnames";
 import { Link } from "@/i18n/navigation";
 
@@ -26,7 +25,6 @@ export default function PageHero({
   collectionMintAddress?: string;
   showBorder?: boolean;
 }) {
-  const t = useTranslations();
   const color = badgeColor
     ? BRAND_COLOURS[badgeColor.toLowerCase() as keyof typeof BRAND_COLOURS]
     : undefined;

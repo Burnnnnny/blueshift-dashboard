@@ -1,5 +1,5 @@
 import { getTranslations } from "next-intl/server";
-import { ChallengeMetadata, challengeColors } from "@/app/utils/challenges";
+import { ChallengeMetadata } from "@/app/utils/challenges";
 import TableOfContents from "@/app/components/TableOfContents/TableOfContents";
 import PageHero from "@/app/components/PageHero/PageHero";
 import Breadcrumbs from "@/app/components/Breadcrumbs";

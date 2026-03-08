@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-empty-object-type */
 import type { AccountInfo } from '@solana/web3.js';
 import type { AccountMeta } from '@solana/web3.js';
 import type { Commitment } from '@solana/web3.js';

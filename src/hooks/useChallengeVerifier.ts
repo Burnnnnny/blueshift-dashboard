@@ -161,11 +161,11 @@ export function useChallengeVerifier({
               } else {
                 errorMessage = "Upload failed. Please try again.";
               }
-            } catch (jsonParseError) {
+            } catch {
               // If not JSON, use a generic user-friendly message
               errorMessage = "Upload failed. Please try again.";
             }
-          } catch (textError) {
+          } catch {
             // If we can't read the response text, use a generic user-friendly message
             errorMessage = "Upload failed. Please try again.";
           }

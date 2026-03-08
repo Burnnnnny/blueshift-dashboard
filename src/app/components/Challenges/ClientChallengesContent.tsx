@@ -13,7 +13,6 @@ import {
   InterceptedRpcCallData,
   InterceptedWsSendData,
   WsSendDecision,
-  InterceptedWsReceiveData,
   WsReceiveDecision,
 } from "@/hooks/useEsbuildRunner";
 import { useChallengeVerifier } from "@/hooks/useChallengeVerifier";
@@ -29,6 +28,7 @@ import classNames from "classnames";
 import { useWindowSize } from "usehooks-ts";
 import ChallengeCompleted from "../Modals/ChallengeComplete";
 import { usePersistentStore } from "@/stores/store";
+import type { PanInfo } from "motion/react";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
 const rpcEndpoint = process.env.NEXT_PUBLIC_MAINNET_RPC_ENDPOINT;
@@ -166,9 +166,7 @@ export default function ChallengesContent({
     return { decision: "PROCEED" };
   };
 
-  const handleWsReceiveForDecision = async (
-    _wsReceiveData: InterceptedWsReceiveData
-  ): Promise<WsReceiveDecision> => {
+  const handleWsReceiveForDecision = async (): Promise<WsReceiveDecision> => {
     return { decision: "PROCEED" };
   };
 
@@ -360,7 +358,7 @@ export default function ChallengesContent({
     setIsDragging(true);
   };
 
-  const handleDrag = (_event: any, info: any) => {
+  const handleDrag = (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     if (!isMobile || !editorRef.current) return;
 
     // Calculate height constraints in dvh

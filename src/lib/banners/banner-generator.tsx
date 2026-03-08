@@ -1214,9 +1214,10 @@ export const generateBannerData = async ({
       width: imageResponseOptions.width,
       height: imageResponseOptions.height,
     };
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
     console.error(
-      `[BannerGenerator] Failed to generate banner for ${itemSlug}${lessonSlug ? "/" + lessonSlug : ""}: ${e.message}`
+      `[BannerGenerator] Failed to generate banner for ${itemSlug}${lessonSlug ? "/" + lessonSlug : ""}: ${errorMessage}`
     );
     return null;
   }
@@ -1238,4 +1239,3 @@ async function loadGoogleFont(font: string, text: string) {
 
   throw new Error("failed to load font data");
 }
-

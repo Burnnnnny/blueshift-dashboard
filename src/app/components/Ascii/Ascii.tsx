@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { BRAND_COLOURS } from "@blueshift-gg/ui-components";
-import { anticipate } from "motion";
 
 interface AsciiAnimationProps {
   textPath: string;
@@ -19,7 +18,7 @@ const AsciiAnimation = ({ textPath, color }: AsciiAnimationProps) => {
       .then((text) => {
         setText(text);
       });
-  }, []);
+  }, [textPath]);
 
   return (
     <motion.div

@@ -5,14 +5,11 @@ import classNames from "classnames";
 import { Link } from "@/i18n/navigation";
 import { useDirectionalHover } from "@/app/hooks/useDirectionalHover";
 import {
-  anticipate,
   Badge,
-  breeze,
   Button,
   CrosshairCorners,
   Difficulty,
   Divider,
-  glide,
   IconName,
 } from "@blueshift-gg/ui-components";
 import { useTranslations } from "next-intl";
@@ -42,7 +39,6 @@ export default function ChallengeCard({
   hrefOverride,
 }: ChallengeCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [hasHovered, setHasHovered] = useState(false);
   const [isHoveredFooter, setIsHoveredFooter] = useState(false);
 
   const {
@@ -77,7 +73,6 @@ export default function ChallengeCard({
       ref={cardRef}
       onMouseEnter={(e) => {
         handleMouseEnter(e);
-        setHasHovered(true);
       }}
       onMouseLeave={handleMouseLeave}
       style={

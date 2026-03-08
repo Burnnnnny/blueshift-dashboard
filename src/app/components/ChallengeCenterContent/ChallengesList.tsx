@@ -41,6 +41,13 @@ const challengeSections = {
   },
 } as const;
 
+const challengeSectionEntries = Object.entries(challengeSections) as Array<
+  [
+    keyof typeof challengeSections,
+    (typeof challengeSections)[keyof typeof challengeSections],
+  ]
+>;
+
 type ChallengesListProps = {
   initialChallenges?: ChallengeMetadata[];
   isLoading?: boolean;
@@ -69,12 +76,12 @@ const ScrollableSection = forwardRef<
 ScrollableSection.displayName = "ScrollableSection";
 
 type ChallengeSectionProps = {
-  language: string;
-  section: { icon: string; title: string };
+  language: keyof typeof challengeSections;
+  section: (typeof challengeSections)[keyof typeof challengeSections];
   challenges: ChallengeMetadata[];
   setIsNFTViewerOpen: (isOpen: boolean) => void;
   setSelectedChallenge: (challenge: ChallengeMetadata) => void;
-  t: any;
+  t: (key: string) => string;
   completedCount: number;
   totalCount: number;
 };
@@ -94,6 +101,9 @@ function ChallengeSection({
     isAtStart: true,
     isAtEnd: false,
   });
+  const bannerVariant = language.toLowerCase() as Lowercase<
+    keyof typeof challengeSections
+  >;
 
   const updateScrollState = () => {
     if (scrollRef.current) {
@@ -127,9 +137,9 @@ function ChallengeSection({
     <div className="flex flex-col group/section border border-border-light">
       <div className="flex flex-col gap-y-1 p-1">
         <Banner
-          icon={{ name: section.icon as any, size: 16 }}
+          icon={{ name: section.icon, size: 16 }}
           title={t(section.title)}
-          variant={language as any}
+          variant={bannerVariant}
         >
           <span className="text-current ml-auto">
             {completedCount}/{totalCount} completed
@@ -347,11 +357,6 @@ export default function ChallengesList({
   }, [initialChallenges, challengeStatuses]);
 
   const hasNoResults = filteredChallenges.length === 0;
-  const hasNoFilters =
-    !searchValue &&
-    selectedLanguages.length === 0 &&
-    selectedDifficulties.length === 0 &&
-    activeTab === "open";
 
   const [isNFTViewerOpen, setIsNFTViewerOpen] = useState(false);
   const [selectedChallenge, setSelectedChallenge] = useState<ChallengeMetadata>(
@@ -489,7 +494,7 @@ export default function ChallengesList({
             >
               {isLoading
                 ? Array.from({ length: 3 }).map((_, index) => (
-                    <ChallengeCardSkeleton />
+                    <ChallengeCardSkeleton key={`featured-skeleton-${index}`} />
                   ))
                 : recommendedChallenges.map((challenge) => (
                     <ChallengeCard
@@ -587,7 +592,7 @@ export default function ChallengesList({
         </div>
 
         <div className="flex flex-col gap-y-8">
-          {Object.entries(challengeSections).map(([language, section]) => {
+          {challengeSectionEntries.map(([language, section]) => {
             const languageChallenges = filteredChallenges
               .filter((challenge) => challenge.language === language)
               .sort((a, b) => {

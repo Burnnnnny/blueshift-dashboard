@@ -1,8 +1,7 @@
 "use client";
 
 import { PathDifficulty, PathLanguages } from "@/app/utils/path";
-import { difficulty as difficultyMap } from "@/app/utils/common";
-import React, { useRef, useState } from "react";
+import React, { useRef } from "react";
 import classNames from "classnames";
 import { Link } from "@/i18n/navigation";
 import { useDirectionalHover } from "@/app/hooks/useDirectionalHover";
@@ -32,7 +31,6 @@ export default function PathCard({
   name,
   description,
   color,
-  difficulty,
   className,
   link,
   completedStepsCount = 0,
@@ -43,7 +41,6 @@ export default function PathCard({
   pathSlug,
 }: PathCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [hasHovered, setHasHovered] = useState(false);
   const {
     isHovered,
     direction,
@@ -54,8 +51,6 @@ export default function PathCard({
 
   const t = useTranslations();
 
-  const badgeDifficulty = difficultyMap[difficulty ?? 1];
-
   const isCompleted =
     completedStepsCount === totalStepsCount && totalStepsCount > 0;
   const hasProgress = completedStepsCount > 0;
@@ -65,7 +60,6 @@ export default function PathCard({
       ref={cardRef}
       onMouseEnter={(e) => {
         handleMouseEnter(e);
-        setHasHovered(true);
       }}
       onMouseLeave={handleMouseLeave}
       style={
@@ -154,29 +148,28 @@ export default function PathCard({
                     ? t("paths.continue_path")
                     : t("paths.start_path")
               }
-              children={
-                hasProgress ? (
-                  <div className="flex items-center gap-x-2 order-last ml-auto">
-                    <ProgressCircle
-                      percentFilled={
-                        totalStepsCount > 0
-                          ? (completedStepsCount / totalStepsCount) * 100
-                          : 0
-                      }
-                    />
-                    <span className="text-sm text-shade-tertiary font-mono">
-                      {completedStepsCount}/{totalStepsCount}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-x-2 order-last ml-auto">
-                    <span className="text-sm font-medium bg-clip-text text-shade-tertiary">
-                      {totalStepsCount} {t("paths.units")}
-                    </span>
-                  </div>
-                )
-              }
-            />
+            >
+              {hasProgress ? (
+                <div className="flex items-center gap-x-2 order-last ml-auto">
+                  <ProgressCircle
+                    percentFilled={
+                      totalStepsCount > 0
+                        ? (completedStepsCount / totalStepsCount) * 100
+                        : 0
+                    }
+                  />
+                  <span className="text-sm text-shade-tertiary font-mono">
+                    {completedStepsCount}/{totalStepsCount}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-x-2 order-last ml-auto">
+                  <span className="text-sm font-medium bg-clip-text text-shade-tertiary">
+                    {totalStepsCount} {t("paths.units")}
+                  </span>
+                </div>
+              )}
+            </Button>
           </Link>
         </div>
       </div>

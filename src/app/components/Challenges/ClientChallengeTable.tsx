@@ -44,9 +44,7 @@ export default function ChallengeTable({
   error,
   verificationData,
   challenge,
-  isCodeRunning,
   runnerLogs,
-  isEsbuildReady,
   onRedoChallenge,
   isOpen,
   allowRedo,
@@ -70,8 +68,6 @@ export default function ChallengeTable({
       }
     }
   }, [verificationData, requirements]);
-
-  const overallIsLoading = isCodeRunning || !isEsbuildReady;
 
   return (
     <motion.div

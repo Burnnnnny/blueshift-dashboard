@@ -22,7 +22,6 @@ import { useTranslations } from "next-intl";
 import { AnimatePresence, motion } from "motion/react";
 import { BRAND_COLOURS } from "@blueshift-gg/ui-components";
 import ProgressCircle from "../ProgressCircle/ProgressCircle";
-import { Icon } from "@blueshift-gg/ui-components";
 import AsciiAnimation from "../Ascii/Ascii";
 
 type CourseCardProps = {
@@ -156,8 +155,14 @@ export default function CourseCard({
                 <Divider direction="vertical" className="h-[20px]" />
                 <Badge
                   size="sm"
-                  variant="beginner"
-                  label="Beginner"
+                  variant={
+                    badgeDifficulty.toLowerCase() as
+                      | "beginner"
+                      | "intermediate"
+                      | "advanced"
+                      | "expert"
+                  }
+                  label={badgeDifficulty}
                   className="leading-[100%] min-h-[20px]!"
                   crosshair={{
                     size: 4,
@@ -165,7 +170,9 @@ export default function CourseCard({
                     animationDelay: 0,
                     animationDuration: 0.01,
                   }}
-                  icon={<Difficulty size={12} difficulties={[1]} />}
+                  icon={
+                    <Difficulty size={12} difficulties={[difficulty ?? 1]} />
+                  }
                 />
               </motion.div>
             )}
@@ -218,24 +225,23 @@ export default function CourseCard({
                     ? t("lessons.review_course")
                     : t("lessons.continue_learning")
               }
-              children={
-                completedLessonsCount === 0 ? null : (
-                  <div className="flex items-center gap-x-2 order-last">
-                    <Divider direction="vertical" className="h-[20px]!" />
-                    <ProgressCircle
-                      percentFilled={
-                        completedLessonsCount && totalLessonCount
-                          ? (completedLessonsCount / totalLessonCount) * 100
-                          : 0
-                      }
-                    />
-                    <span className="text-sm text-shade-tertiary font-mono">
-                      {completedLessonsCount ?? 0}/{totalLessonCount ?? 0}
-                    </span>
-                  </div>
-                )
-              }
-            />
+            >
+              {completedLessonsCount === 0 ? null : (
+                <div className="flex items-center gap-x-2 order-last">
+                  <Divider direction="vertical" className="h-[20px]!" />
+                  <ProgressCircle
+                    percentFilled={
+                      completedLessonsCount && totalLessonCount
+                        ? (completedLessonsCount / totalLessonCount) * 100
+                        : 0
+                    }
+                  />
+                  <span className="text-sm text-shade-tertiary font-mono">
+                    {completedLessonsCount ?? 0}/{totalLessonCount ?? 0}
+                  </span>
+                </div>
+              )}
+            </Button>
           </Link>
         </div>
       </div>

@@ -10,6 +10,10 @@ interface Props {
   className?: string
 }
 
+type Analytics = {
+  track: (eventName: string, payload: Record<string, string>) => void
+}
+
 // Map course IDs to contextual topic descriptions
 const COURSE_TOPICS: Record<CourseId, string> = {
   "introduction-to-assembly": "sBPF assembly optimization and JIT compilation",
@@ -42,8 +46,11 @@ export const FurtherReading = memo<Props>(({ courseId, className }) => {
 
   const handleClick = useCallback(
     (articleId: string) => {
-      if (typeof window !== "undefined" && (window as any).analytics) {
-        ; (window as any).analytics.track("research_link_clicked", {
+      const analytics = (
+        window as Window & { analytics?: Analytics }
+      ).analytics
+      if (analytics) {
+        analytics.track("research_link_clicked", {
           source: "course_conclusion",
           course: courseId,
           article: articleId,

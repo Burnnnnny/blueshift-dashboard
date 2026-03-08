@@ -1,13 +1,9 @@
-import { getTranslations } from "next-intl/server";
 import { getChallenge } from "@/app/utils/content";
 import { getCompiledMdx } from "@/app/utils/mdx";
 import { notFound } from "next/navigation";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { decodeCoreCollectionNumMinted } from "@/lib/nft/decodeCoreCollectionNumMinted";
 import ContentPagination from "@/app/components/CoursesContent/ContentPagination";
-import { Link } from "@/i18n/navigation";
-import { Button } from "@blueshift-gg/ui-components";
-import { Icon } from "@blueshift-gg/ui-components";
 import ChallengeLayout from "@/app/components/Layout/ChallengeLayout";
 import MdxLayout from "@/app/mdx-layout";
 import ContentFallbackNotice from "@/app/components/ContentFallbackNotice";
@@ -24,7 +20,6 @@ interface ChallengePageContainerProps {
 export default async function ChallengePageContainer({
   params,
 }: ChallengePageContainerProps) {
-  const t = await getTranslations();
   const { challengeSlug, pageSlug, locale } = await params;
 
   const challengeMetadata = await getChallenge(challengeSlug);
@@ -46,13 +41,13 @@ export default async function ChallengePageContainer({
       MdxComponent = await getCompiledMdx(
         `challenges/${challengeSlug}/${locale}/pages/${pageSlug}.mdx`
       );
-    } catch (error) {
+    } catch {
       try {
         MdxComponent = await getCompiledMdx(
           `challenges/${challengeSlug}/en/pages/${pageSlug}.mdx`
         );
         challengeLocale = "en";
-      } catch (error) {
+      } catch {
         notFound();
       }
     }
@@ -61,13 +56,13 @@ export default async function ChallengePageContainer({
       MdxComponent = await getCompiledMdx(
         `challenges/${challengeSlug}/${locale}/challenge.mdx`
       );
-    } catch (error) {
+    } catch {
       try {
         MdxComponent = await getCompiledMdx(
           `challenges/${challengeSlug}/en/challenge.mdx`
         );
         challengeLocale = "en";
-      } catch (error) {
+      } catch {
         notFound();
       }
     }

@@ -3,7 +3,6 @@ import {
   languageColors,
   difficulty,
   Language,
-  Difficulty,
 } from "./common";
 import { CourseDifficulty, CourseMetadata } from "./course";
 import { ChallengeMetadata } from "./challenges";

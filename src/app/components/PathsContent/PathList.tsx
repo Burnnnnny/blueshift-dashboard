@@ -2,22 +2,13 @@
 
 import { PathMetadata, getPathCompletedSteps } from "@/app/utils/path";
 import { CourseLanguages } from "@/app/utils/course";
-import { languageFilterMap, difficultyFilterMap } from "@/app/utils/common";
 import { usePersistentStore } from "@/stores/store";
 import PathCard from "../PathCard/PathCard";
 import classNames from "classnames";
-import { getPathDropdownItems } from "@/app/utils/dropdownItems";
 import { useTranslations } from "next-intl";
 import { recommendPaths } from "@/app/utils/recommendations";
-import {
-  Banner,
-  Dropdown,
-  Input,
-  Icon,
-  Tabs,
-} from "@blueshift-gg/ui-components";
+import { Banner, Input, Icon, Tabs } from "@blueshift-gg/ui-components";
 import { useStore } from "@/stores/store";
-import { useWindowSize } from "usehooks-ts";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import PathCardSkeleton from "../PathCard/PathCardSkeleton";
 
@@ -33,11 +24,7 @@ export default function PathList({
   const t = useTranslations();
   const {
     selectedLanguages,
-    toggleLanguage,
-    setLanguages,
     selectedDifficulties,
-    toggleDifficulty,
-    setDifficulties,
     courseProgress,
     challengeStatuses,
   } = usePersistentStore();
@@ -72,9 +59,6 @@ export default function PathList({
   // Initialize tab - will be updated by useEffect based on hasInProgress
   const [activeTab, setActiveTab] = useState("all-paths");
 
-  const { width } = useWindowSize();
-  const [isMobile, setIsMobile] = useState(false);
-
   const [scrollState, setScrollState] = useState({
     isAtStart: true,
     isAtEnd: false,
@@ -103,10 +87,6 @@ export default function PathList({
     }
   }, []);
 
-  useEffect(() => {
-    setIsMobile(width < 768);
-  }, [width]);
-
   // Track if user has manually changed the tab
   const userChangedTab = useRef(false);
 
@@ -115,45 +95,6 @@ export default function PathList({
     userChangedTab.current = true;
     setActiveTab(tab);
   }, []);
-
-  const handleFilterChange = (value: string | string[] | undefined) => {
-    if (Array.isArray(value)) {
-      const newLanguages: CourseLanguages[] = [];
-      const newDifficulties: number[] = [];
-      const statusOptions = ["in-progress", "completed"];
-      const selectedStatuses: string[] = [];
-
-      value.forEach((v) => {
-        if (v in difficultyFilterMap) {
-          newDifficulties.push(difficultyFilterMap[v]);
-        } else if (v in languageFilterMap) {
-          newLanguages.push(languageFilterMap[v]);
-        } else if (statusOptions.includes(v)) {
-          selectedStatuses.push(v);
-        }
-      });
-
-      setLanguages(newLanguages);
-      setDifficulties(newDifficulties);
-
-      if (selectedStatuses.length > 1) {
-        const newStatus = selectedStatuses.find((s) => s !== activeTab);
-        handleTabChange(newStatus || "all-paths");
-      } else if (selectedStatuses.length === 1) {
-        handleTabChange(selectedStatuses[0]);
-      } else {
-        handleTabChange("all-paths");
-      }
-    } else if (typeof value === "string") {
-      if (value in difficultyFilterMap) {
-        toggleDifficulty(difficultyFilterMap[value]);
-      } else if (value in languageFilterMap) {
-        toggleLanguage(languageFilterMap[value]);
-      } else if (["in-progress", "completed"].includes(value)) {
-        handleTabChange(value === activeTab ? "all-paths" : value);
-      }
-    }
-  };
 
   // Set initial tab based on whether user has in-progress paths
   // This handles both initial load and when store values load asynchronously
@@ -217,9 +158,6 @@ export default function PathList({
     .sort((a, b) => a.difficulty - b.difficulty);
 
   const hasNoResults = filteredPaths.length === 0;
-
-  const dropdownItems = getPathDropdownItems();
-
   const seed = useMemo(
     () => new Date().toISOString().slice(0, 10),
     []

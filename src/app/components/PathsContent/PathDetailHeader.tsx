@@ -2,12 +2,10 @@
 
 import {
   getPathCompletedSteps,
-  PathStep,
   PathStepWithMetadata,
 } from "@/app/utils/path";
 import { usePersistentStore } from "@/stores/store";
 import { useTranslations } from "next-intl";
-import { Icon } from "@blueshift-gg/ui-components";
 
 import classNames from "classnames";
 import ProgressCircle from "../ProgressCircle/ProgressCircle";

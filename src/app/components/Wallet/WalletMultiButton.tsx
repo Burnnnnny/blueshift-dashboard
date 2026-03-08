@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
-import { breeze, Button, crisp } from "@blueshift-gg/ui-components";
+import { Button, crisp } from "@blueshift-gg/ui-components";
 import DecryptedText from "../HeadingReveal/DecryptText";
 import { useAuth } from "@/hooks/useAuth";
 import { motion } from "motion/react";

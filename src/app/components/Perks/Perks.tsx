@@ -2,10 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import {
-  Avatar,
-  Button,
   CrosshairCorners,
-  IconName,
   Tabs,
 } from "@blueshift-gg/ui-components";
 import { Faucet, type FaucetConfig } from "@blueshift-gg/faucet-react";
